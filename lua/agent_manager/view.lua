@@ -556,9 +556,11 @@ function View:_map_prompt_buffer(buffer)
 end
 
 function View:_map_buffer(buffer)
-  vim.keymap.set("n", "gw", function()
-    if self.actions.workflows then self.actions.workflows() end
-  end, { buffer = buffer, silent = true, desc = "Show long-running workflows" })
+  for _, key in ipairs({ "gs", "gw" }) do
+    vim.keymap.set("n", key, function()
+      if self.actions.workflows then self.actions.workflows() end
+    end, { buffer = buffer, silent = true, desc = "Show long-running workflows" })
+  end
   self:_map_windows(buffer)
   local map_opts = function(description)
     return { buffer = buffer, silent = true, nowait = true, desc = description }
