@@ -14,8 +14,8 @@ use crate::protocol::{ProviderRuntime, RequestId};
 
 pub const WORKER_PROTOCOL_VERSION: u32 = 1;
 pub const CLAUDE_COMPATIBILITY_PROFILE: &str = "claude-agent-sdk-v1";
-pub const TESTED_CLAUDE_SDK_VERSION: &str = "0.2.148";
-pub const TESTED_CLAUDE_CODE_VERSION: &str = "2.1.251";
+pub const TESTED_CLAUDE_SDK_VERSION: &str = "0.2.152";
+pub const TESTED_CLAUDE_CODE_VERSION: &str = "2.1.259";
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

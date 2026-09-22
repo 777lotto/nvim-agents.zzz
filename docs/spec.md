@@ -677,6 +677,7 @@ Final command names follow the selected package name. The working surface is:
 | `:AgentManagerDiff`             | Show a diff or resolve a dirty-buffer conflict.         |
 | `:AgentManagerDelete`           | Confirm deletion of inactive provider session history.  |
 | `:AgentManagerHealth`           | Show component and integration health.                  |
+| `:AgentManagerWorkflows`        | Observe the external long-running queue in the same tab. |
 
 Commands accept structured Lua options through the public API; command-line
 arguments remain deliberately small.
@@ -1224,7 +1225,7 @@ non-sensitive service status.
 Implementation status: complete on 2026-09-02; signed v0.1.0 publication is
 pending. The release freezes the broker and worker protocol at version 1,
 Codex App Server 0.152.0, Claude Agent SDK
-0.2.148, Claude Code 2.1.251, and the promoted Foundation/Styling/Chrome
+0.2.152, Claude Code 2.1.259, and the promoted Foundation/Styling/Chrome
 revisions in `release/compatibility-v1.json`. Independent release builds are
 byte-identical and contain an internal payload checksum manifest plus an outer
 `SHA256SUMS`. The payload includes the exact relocatable Python interpreter, so

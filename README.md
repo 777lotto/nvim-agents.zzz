@@ -34,7 +34,7 @@ agent-manager broker (Rust)
 
 The Rust broker owns the public protocol, process supervision, normalized
 state, replay, persistence, and the native Codex integration. The Python worker
-owns only Claude SDK objects and callbacks. It has no network listener and no
+owns standalone Claude SDK objects and callbacks. It has no network listener and no
 independent durable registry.
 
 This split uses the strongest supported boundary for each provider without
@@ -47,6 +47,43 @@ session history, resume, and fork APIs needed by an interactive editor.
 See the complete [Agent Manager specification](docs/spec.md), including the
 broker/worker protocol, security model, delivery milestones, and UX
 Foundation/Styling/Chrome integration plan.
+
+## Long-running workflows
+
+`:AgentManagerWorkflows` (or `gw` from a session pane) opens the queue checklist
+in the same tab. `gs` returns to standalone sessions. Completed tasks show their
+sessions and evidence, the running task and latest attempt are highlighted, and
+upcoming/blocked tasks remain visible. Enter inspects a task/session, `l`/`h`
+expand/collapse attempts, Tab switches panes, and `gr` refreshes. Task state polls
+every two seconds; selected running history refreshes at most every five seconds.
+
+These are **separate processes**, not two modes of one agent conversation:
+
+```text
+Neovim: Sessions  -> Rust broker -> existing standalone provider adapters
+Neovim: Workflows -> Python observer -> durable queue records / read-only history
+External queue   -> Python SDK worker -> Codex SDK or Claude Agent SDK
+```
+
+The existing `zemrip-agent` queue owns admission, task worktrees, budgets,
+verification, independent review, recovery and PR integration. The Python runtime
+adds official `openai-codex==0.155.1` and `claude-agent-sdk==0.2.152` execution;
+it does not duplicate that scheduler. The Rust broker remains responsible for
+standalone interactive sessions. Closing Neovim affects neither queue ownership
+nor queue execution. Inspecting a workflow never resumes, interrupts or writes
+to its provider session.
+
+The observer defaults to `$XDG_STATE_HOME/zemrip-agent/queues` (or
+`~/.local/state/zemrip-agent/queues`). Configure `workflows = { python =
+"/absolute/runtime/bin/python", root = "/absolute/queue/root", refresh_ms = 2000 }`
+only for a nonstandard installation. The packaged Python runtime includes both
+execution and observation. Legacy attempts without saved identities still show
+task evidence but cannot expose transcripts. Claude reviews intentionally disable
+transcript persistence inside their read-only sandbox; their results remain visible.
+
+See [the workflow contract](protocol/workflow/v1/README.md) for the execution and
+observation boundary. Queue pause/resume/retry remain explicit external launcher
+actions; this first checklist is read-only, with no second queue controller.
 
 ## Install and verify
 

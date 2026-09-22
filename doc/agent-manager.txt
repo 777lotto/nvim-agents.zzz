@@ -88,6 +88,18 @@ view disconnects Neovim only; it never shuts down the supervised broker.
                                                    *:AgentManager*
 :AgentManager              Open or focus the dedicated workspace tab.
 
+                                                   *:AgentManagerWorkflows*
+:AgentManagerWorkflows     Open the long-running workflow checklist in that tab.
+                          gw opens Workflows from Sessions; gs returns.
+                          Enter inspects a task/session, l/h expand/collapse,
+                          Tab switches panes, gr refreshes, q closes the view.
+                          Checked tasks retain completed work and sessions;
+                          the running task/session is highlighted, followed by
+                          upcoming tasks. This observer never resumes a session.
+                          The external queue keeps running when Neovim closes.
+                          Legacy/review transcripts may be unavailable; their
+                          saved result evidence remains visible.
+
                                                    *:AgentManagerStart*
 :AgentManagerStart [codex|claude]
                            Use the current project as a directory hint, select

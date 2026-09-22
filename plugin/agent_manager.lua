@@ -11,6 +11,10 @@ vim.api.nvim_create_user_command("AgentManager", function()
   manager().open()
 end, { desc = "Open the Agent Manager workspace" })
 
+vim.api.nvim_create_user_command("AgentManagerWorkflows", function()
+  manager().open_workflows()
+end, { desc = "Inspect long-running workflow checklists and sessions" })
+
 vim.api.nvim_create_user_command("AgentManagerStart", function(args)
   local cwd = vim.fs.root(0, { ".git" }) or vim.uv.cwd()
   local provider = args.args ~= "" and args.args or nil

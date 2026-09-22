@@ -16,8 +16,8 @@
   "providers": {
     "codex_app_server": "0.152.0",
     "codex_profile": "codex-app-server-stable-v1",
-    "claude_agent_sdk": "0.2.148",
-    "claude_code": "2.1.251",
+    "claude_agent_sdk": "0.2.152",
+    "claude_code": "2.1.259",
     "claude_profile": "claude-agent-sdk-v1"
   },
   "ux": {

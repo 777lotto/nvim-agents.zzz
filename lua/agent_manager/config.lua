@@ -105,6 +105,11 @@ local function defaults()
       lifecycle = discovered_executable("zemrip-agent-workspace"),
       allow_shared = false,
     },
+    workflows = {
+      python = default_claude_python(root),
+      root = nil,
+      refresh_ms = 2000,
+    },
     ui = {
       max_events = 2000,
       agent_width = 40,
@@ -153,6 +158,17 @@ function M.resolve(opts)
   end
   opts = opts or {}
   local config = vim.tbl_deep_extend("force", defaults(), opts)
+  if type(config.workflows) ~= "table"
+      or type(config.workflows.refresh_ms) ~= "number"
+      or config.workflows.refresh_ms < 500
+      or config.workflows.refresh_ms > 60000
+      or config.workflows.refresh_ms % 1 ~= 0
+      or (config.workflows.python ~= nil and (type(config.workflows.python) ~= "string"
+        or config.workflows.python:sub(1, 1) ~= "/"))
+      or (config.workflows.root ~= nil and (type(config.workflows.root) ~= "string"
+        or config.workflows.root:sub(1, 1) ~= "/")) then
+    return nil, { kind = "configuration", message = "workflows needs absolute paths and refresh_ms between 500 and 60000" }
+  end
   if opts.broker and opts.broker.command then
     config.broker.command = vim.deepcopy(opts.broker.command)
   end

@@ -353,6 +353,12 @@ function M.setup(opts)
     end,
   }
   view = View.new(model, actions, config.ui)
+  actions.workflows = function() M.open_workflows() end
+  view.workflows = require("agent_manager.workflows").new(view, config.workflows, function()
+    view.workspace_mode = "sessions"
+    view:_build_layout("agents")
+    M.open()
+  end)
   runtime = {
     config = config,
     model = model,
@@ -392,6 +398,14 @@ function M.open()
     report(start_err)
     return nil, start_err
   end
+  return true
+end
+
+function M.open_workflows()
+  local ok, err = ensure_setup()
+  if not ok then return nil, err end
+  runtime.view:open()
+  runtime.view.workflows:open()
   return true
 end
 

@@ -556,6 +556,9 @@ function View:_map_prompt_buffer(buffer)
 end
 
 function View:_map_buffer(buffer)
+  vim.keymap.set("n", "gw", function()
+    if self.actions.workflows then self.actions.workflows() end
+  end, { buffer = buffer, silent = true, desc = "Show long-running workflows" })
   self:_map_windows(buffer)
   local map_opts = function(description)
     return { buffer = buffer, silent = true, nowait = true, desc = description }
@@ -726,6 +729,10 @@ function View:open()
 end
 
 function View:_build_layout(initial_pane)
+  if self.workspace_mode == "workflows" and self.workflows then
+    self.workflows:layout()
+    return
+  end
   if not valid_tab(self.tab) or vim.api.nvim_get_current_tabpage() ~= self.tab then
     return
   end
@@ -1227,6 +1234,10 @@ end
 
 function View:render()
   if not valid_tab(self.tab) then
+    return
+  end
+  if self.workspace_mode == "workflows" and self.workflows then
+    self.workflows:render()
     return
   end
   self:_render_agents()
@@ -1942,6 +1953,7 @@ end
 
 function View:teardown()
   self:close()
+  if self.workflows then self.workflows:teardown() end
   if self.augroup then
     pcall(vim.api.nvim_del_augroup_by_id, self.augroup)
     self.augroup = nil
