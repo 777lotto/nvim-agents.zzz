@@ -12,7 +12,11 @@ actions. There is no listener or shell interpolation.
   resume field is not used for automatic retry. Git/task evidence supplies continuity.
 - `inspect [--root ROOT]`: one version-1 JSON object with `programs` and `errors`.
   Each program has repository/program identity, control and ordered tasks.
-  Each task carries status, goal, evidence, dependencies, heartbeat and attempts.
+  Each task carries status, goal, milestone, evidence, dependencies, heartbeat and
+  attempts. Neovim groups tasks by `milestone` in first-occurrence order, preserving
+  task order within each group. Missing/null/empty milestones use Other tasks.
+  Grouping is presentation only: it does not change dependencies or admission.
+  Optional JSON nulls are decoded as absent Lua fields, never displayed as `vim.NIL`.
   Attempts retain provider/session identity, result and usage; missing legacy
   identity is explicitly unavailable, never reconstructed by starting a session.
 - `history --repository R --program P --task T --attempt A [--root ROOT]`:

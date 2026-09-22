@@ -5,7 +5,7 @@ local completed = { merged = true, satisfied = true, completed = true }
 local active = { running = true, verifying = true, merging = true, reviewed = true }
 
 local function inline(value)
-  return tostring(value or ""):gsub("[%z\r\n]", " ")
+  return tostring(value ~= vim.NIL and value or ""):gsub("[%z\r\n]", " ")
 end
 
 local function valid(window)
@@ -38,13 +38,9 @@ function Workflows:_buffer(name)
   map("gw", function() self:open() end, "Show workflows")
   map("q", function() self.view:close() end, "Close Agent Manager")
   map("gr", function() self:refresh(true) end, "Refresh workflow and selected session")
-  map("<CR>", function() self:select() end, "Inspect task or session")
-  map("l", function() self:select(true) end, "Expand task sessions")
-  map("h", function()
-    if vim.api.nvim_get_current_win() ~= self.windows.checklist then return end
-    local row = self.rows[vim.api.nvim_win_get_cursor(0)[1]]
-    if row then self.expanded[row.key] = nil; self:render() end
-  end, "Collapse task sessions")
+  map("<CR>", function() self:select() end, "Toggle workflow/phase or inspect task/session")
+  map("l", function() self:select(true) end, "Expand workflow, phase, or task")
+  map("h", function() self:collapse() end, "Collapse row or go to parent")
   map("<Tab>", function()
     local target = vim.api.nvim_get_current_win() == self.windows.checklist
       and self.windows.detail or self.windows.checklist
@@ -101,7 +97,7 @@ function Workflows:request(action, arguments, callback)
   local ok, process = pcall(vim.system, argv, { text = true, timeout = 15000 }, function(result)
     vim.schedule(function()
       if self.closed then return end
-      local decoded, value = pcall(vim.json.decode, result.stdout or "")
+      local decoded, value = pcall(vim.json.decode, result.stdout or "", { luanil = { object = true, array = true } })
       if result.code ~= 0 or not decoded or type(value) ~= "table" or value.version ~= 1 then
         callback(nil, "Workflow observer unavailable; the queue process is unaffected")
       else
@@ -124,7 +120,7 @@ function Workflows:refresh(with_history)
       if self.selected then
         for _, program in ipairs(snapshot.programs) do
           for _, task in ipairs(program.tasks) do
-            local key = program.repository .. "/" .. program.program .. "/" .. task.id
+            local key = program.repository .. "/" .. program.program .. "/task/" .. task.id
             if key == self.selected.key then
               if active[self.selected.task.status] and not active[task.status] then with_history = true end
               self.selected.task = task
@@ -160,15 +156,39 @@ function Workflows:select(expand_only)
   if vim.api.nvim_get_current_win() ~= self.windows.checklist then return end
   local row = self.rows[vim.api.nvim_win_get_cursor(0)[1]]
   if not row then return end
-  self.expanded[row.key] = true
-  row.follow_latest = row.attempt == nil
-  self.selected = row
-  self.messages = nil
-  self.notice = nil
+  if row.kind == "program" or row.kind == "phase" then
+    self.expanded[row.key] = expand_only or not self.expanded[row.key] or nil
+    self:render()
+    return
+  end
+  self.expanded[row.task_key] = true
+  self.selected = vim.tbl_extend("force", {}, row, {
+    key = row.task_key, follow_latest = row.kind == "task",
+  })
+  self.messages, self.notice, self.history_at = nil, nil, nil
   self.generation = self.generation + 1
-  if not row.attempt then row.attempt = row.task.attempts[#row.task.attempts] end
+  if not self.selected.attempt then
+    self.selected.attempt = row.task.attempts[#row.task.attempts]
+  end
   self:render()
   if not expand_only then self:load_history() end
+end
+
+function Workflows:collapse()
+  if vim.api.nvim_get_current_win() ~= self.windows.checklist then return end
+  local row = self.rows[vim.api.nvim_win_get_cursor(0)[1]]
+  if not row then return end
+  if self.expanded[row.key] then
+    self.expanded[row.key] = nil
+    self:render()
+  elseif row.parent then
+    for line, parent in pairs(self.rows) do
+      if parent.key == row.parent then
+        vim.api.nvim_win_set_cursor(self.windows.checklist, { line, 0 })
+        return
+      end
+    end
+  end
 end
 
 function Workflows:load_history()
@@ -199,45 +219,83 @@ end
 
 function Workflows:render()
   if self.view.workspace_mode ~= "workflows" or not self.view.tab then return end
-  local lines = { " WORKFLOWS   ·   gs Sessions", " Enter inspect · l/h expand/collapse · gr refresh", "" }
+  local cursor = valid(self.windows.checklist) and vim.api.nvim_win_get_cursor(self.windows.checklist)
+  local cursor_row = cursor and self.rows[cursor[1]]
+  local lines = { " WORKFLOWS   ·   gs Sessions", " Enter toggle/inspect · l/h expand/parent · gr refresh", "" }
   local highlights = {}
   self.rows = {}
+  local function add(text, row, highlight)
+    table.insert(lines, text)
+    self.rows[#lines] = row
+    if highlight then table.insert(highlights, { #lines - 1, highlight }) end
+  end
+  local function marker(key) return self.expanded[key] and "▾" or "▸" end
   if self.error then table.insert(lines, " " .. self.error) end
   for _, program in ipairs(self.snapshot.programs or {}) do
-    local count = 0
-    for _, task in ipairs(program.tasks) do if completed[task.status] then count = count + 1 end end
-    table.insert(lines, string.format(" %s / %s · %d/%d complete%s", program.repository,
-      program.program, count, #program.tasks, program.control.paused and " · paused" or ""))
+    local program_key = program.repository .. "/" .. program.program
+    local count, phases, by_phase = 0, {}, {}
     for _, task in ipairs(program.tasks) do
-      local key = program.repository .. "/" .. program.program .. "/" .. task.id
-      local mark = completed[task.status] and "x" or (active[task.status] and ">"
-        or (task.status == "pending" or task.status == "ready") and " " or "!")
-      table.insert(lines, string.format(" [%s] %s · %s", mark, inline(task.goal:match("[^\n]*")), task.status))
-      self.rows[#lines] = { key = key, task = task, program = program }
-      if completed[task.status] or active[task.status] then
-        table.insert(highlights, { #lines - 1, completed[task.status]
-          and "AgentManagerStatusSuccess" or "AgentManagerStatusWaiting" })
+      local milestone = inline(task.milestone)
+      local phase = by_phase[milestone]
+      if not phase then
+        phase = { name = milestone ~= "" and milestone or "Other tasks", tasks = {}, count = 0,
+          key = program_key .. "/phase/" .. milestone }
+        by_phase[milestone] = phase
+        table.insert(phases, phase)
       end
-      if self.expanded[key] or active[task.status] then
-        for _, attempt in ipairs(task.attempts or {}) do
-          table.insert(lines, string.format("     %s · %s · %s", attempt.id,
-            inline(attempt.provider), inline(attempt.session_id or "identity unavailable")))
-          self.rows[#lines] = { key = key, task = task, program = program, attempt = attempt }
-          if active[task.status] and attempt == task.attempts[#task.attempts] then
-            table.insert(highlights, { #lines - 1, "AgentManagerStatusWaiting" })
+      table.insert(phase.tasks, task)
+      if completed[task.status] then count = count + 1; phase.count = phase.count + 1 end
+    end
+    add(string.format(" %s %s / %s · %d/%d complete%s", marker(program_key), inline(program.repository),
+      inline(program.program), count, #program.tasks, program.control.paused == true and " · paused" or ""),
+      { key = program_key, kind = "program" })
+    if self.expanded[program_key] then
+      for _, phase in ipairs(phases) do
+        add(string.format("   %s %s · %d/%d complete", marker(phase.key), phase.name, phase.count, #phase.tasks),
+          { key = phase.key, parent = program_key, kind = "phase" })
+        if self.expanded[phase.key] then
+          for _, task in ipairs(phase.tasks) do
+            local key = program_key .. "/task/" .. task.id
+            local mark = completed[task.status] and "x" or (active[task.status] and ">"
+              or (task.status == "pending" or task.status == "ready") and " " or "!")
+            local highlight = completed[task.status] and "AgentManagerStatusSuccess"
+              or active[task.status] and "AgentManagerStatusWaiting" or nil
+            add(string.format("     %s [%s] %s · %s · %d sessions", marker(key), mark,
+              inline((task.goal or ""):match("[^\n]*")), inline(task.status), #task.attempts),
+              { key = key, task_key = key, parent = phase.key, kind = "task", task = task, program = program }, highlight)
+            if self.expanded[key] then
+              for index, attempt in ipairs(task.attempts) do
+                local state = inline(attempt.outcome)
+                if state == "" then
+                  state = active[task.status] and index == #task.attempts and "active" or "recorded"
+                end
+                local identity = inline(attempt.session_id)
+                add(string.format("       %s · %s · %s · %s", inline(attempt.id),
+                  inline(attempt.provider), state, identity ~= "" and identity or "transcript identity unavailable"),
+                  { key = key .. "/session/" .. attempt.id, task_key = key, parent = key, kind = "session",
+                    task = task, program = program, attempt = attempt },
+                  active[task.status] and index == #task.attempts and "AgentManagerStatusWaiting" or nil)
+              end
+              if #task.attempts == 0 then table.insert(lines, "       No sessions yet") end
+            end
           end
         end
-      elseif #task.attempts > 0 then
-        local attempt = task.attempts[#task.attempts]
-        table.insert(lines, "     " .. #task.attempts .. " sessions · " .. inline(attempt.session_id or attempt.id))
-        self.rows[#lines] = { key = key, task = task, program = program, attempt = attempt }
       end
+      if #program.tasks == 0 then table.insert(lines, "   No tasks yet") end
     end
     table.insert(lines, "")
   end
   if #(self.snapshot.programs or {}) == 0 then table.insert(lines, " No workflow programs found") end
   for _, err in ipairs(self.snapshot.errors or {}) do table.insert(lines, " " .. inline(err)) end
   local buffer = self:set_lines("checklist", lines)
+  if cursor_row then
+    for line, row in pairs(self.rows) do
+      if row.key == cursor_row.key then
+        vim.api.nvim_win_set_cursor(self.windows.checklist, { line, cursor[2] })
+        break
+      end
+    end
+  end
   vim.api.nvim_buf_clear_namespace(buffer, self.view.namespace, 0, -1)
   for _, highlight in ipairs(highlights) do
     vim.api.nvim_buf_add_highlight(buffer, self.view.namespace, highlight[2], highlight[1], 0, -1)
@@ -254,7 +312,7 @@ function Workflows:render()
     if #(row.task.depends_on or {}) > 0 then
       table.insert(detail, " Depends on: " .. table.concat(row.task.depends_on, ", "))
     end
-    if row.task.pr_number then table.insert(detail, " PR #" .. row.task.pr_number) end
+    if type(row.task.pr_number) == "number" then table.insert(detail, " PR #" .. row.task.pr_number) end
     for _, evidence in ipairs(row.task.evidence or {}) do table.insert(detail, " " .. inline(evidence)) end
     if row.attempt then
       table.insert(detail, "")

@@ -50,12 +50,22 @@ Foundation/Styling/Chrome integration plan.
 
 ## Long-running workflows
 
-`:AgentManagerWorkflows` (or `gw` from a session pane) opens the queue checklist
-in the same tab. `gs` returns to standalone sessions. Completed tasks show their
-sessions and evidence, the running task and latest attempt are highlighted, and
-upcoming/blocked tasks remain visible. Enter inspects a task/session, `l`/`h`
-expand/collapse attempts, Tab switches panes, and `gr` refreshes. Task state polls
-every two seconds; selected running history refreshes at most every five seconds.
+`:AgentManagerWorkflows` (or `gs` / `gw` from a session pane) opens all workflows
+in the same tab, collapsed initially. `gs` returns to standalone sessions.
+Expand a workflow to see its phases and completed/total task counts, expand a
+phase to see tasks, then a task to see its sessions. Phases use the manifest's
+`milestone` field (the Rust program already has R0, R1, and so on); tasks without
+one appear under Other tasks. Expansion and cursor identity survive polling.
+
+Enter toggles a workflow/phase or inspects a task/session; `l` expands and `h`
+collapses an expanded row or moves to its parent. Tab switches panes and `gr`
+refreshes. Selecting a task follows its latest session; selecting a session pins
+that attempt. Task state polls every two seconds; selected running history
+refreshes at most every five seconds. Completed tasks retain evidence and session
+links. Missing PR/session metadata is omitted or shown as unavailable.
+
+See [authoring a workflow checklist](docs/workflows.md) for artifact placement,
+phase definitions, a manifest example, and the existing Rust plan sources.
 
 These are **separate processes**, not two modes of one agent conversation:
 
