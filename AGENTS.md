@@ -5,8 +5,11 @@
 - `protocol/` is the source of truth for every broker-facing contract.
 - The Rust broker owns public protocol state, provider process supervision,
   event sequencing, and the native Codex App Server adapter.
-- The Python worker owns Claude Agent SDK objects and callbacks only. It must
-  never expose a listener or write non-protocol data to standard output.
+- The standalone Python worker owns Claude Agent SDK objects and callbacks.
+  The separate Python workflow package owns queue SDK invocations (Codex and
+  Claude) and read-only history projection. Neither exposes a listener or
+  writes non-protocol data to standard output. The external queue owns scheduling;
+  never resume a queue-owned session from the standalone session manager.
 - Provider-specific payloads stay namespaced. Do not erase capabilities merely
   to make Codex and Claude appear identical.
 - M2 owns the safe interactive workflow on the embedded stdio broker: one live

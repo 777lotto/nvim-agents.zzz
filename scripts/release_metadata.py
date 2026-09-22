@@ -323,7 +323,9 @@ def verify_runtime_layout(root: Path) -> None:
             "-B",
             "-I",
             "-c",
-            "import agent_manager_claude_worker, claude_agent_sdk",
+            "import agent_manager_claude_worker, claude_agent_sdk; "
+            "import agent_manager_workflows.execution, "
+            "agent_manager_workflows.observation, openai_codex",
         ],
         check=False,
         capture_output=True,

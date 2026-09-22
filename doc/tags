@@ -11,6 +11,7 @@
 :AgentManagerSend	agent-manager.txt	/*:AgentManagerSend*
 :AgentManagerStart	agent-manager.txt	/*:AgentManagerStart*
 :AgentManagerSteer	agent-manager.txt	/*:AgentManagerSteer*
+:AgentManagerWorkflows	agent-manager.txt	/*:AgentManagerWorkflows*
 agent-manager	agent-manager.txt	/*agent-manager*
 agent-manager-commands	agent-manager.txt	/*agent-manager-commands*
 agent-manager-intro	agent-manager.txt	/*agent-manager-intro*

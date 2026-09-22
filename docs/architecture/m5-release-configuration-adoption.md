@@ -23,7 +23,7 @@ v0.1.0:
 | Neovim                           | 0.12.4                                     |
 | Broker version/revision / worker | 1 / 1 / 1                                  |
 | Codex App Server                 | 0.152.0                                    |
-| Claude Agent SDK / Claude Code   | 0.2.148 / 2.1.251                          |
+| Claude Agent SDK / Claude Code   | 0.2.152 / 2.1.259                          |
 | UX Foundation                    | `7b8700db546b35e7b6a40b9a41b129354981587f` |
 | UX Styling                       | `3379b8ba03380316a5a8f3ad3671509e9283b518` |
 | UX Chrome                        | `a6a20a2135603484cd451ba7f338cf0b6fa7dbad` |

@@ -10,7 +10,10 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 license = "MIT"
 authors = [{ name = "zemrip-ai" }]
-dependencies = ["claude-agent-sdk==0.2.152"]
+dependencies = [
+    "claude-agent-sdk==0.2.152",
+    "openai-codex==0.155.1",
+]
 
 [project.scripts]
 agent-manager-claude-worker = "agent_manager_claude_worker.__main__:main"
@@ -24,7 +27,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_manager_claude_worker"]
+packages = ["src/agent_manager_claude_worker", "src/agent_manager_workflows"]
 
 [tool.ruff]
 target-version = "py313"

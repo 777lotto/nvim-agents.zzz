@@ -1443,7 +1443,8 @@ local function managed_start_uses_focused_layout_without_inventory_test()
   vim.ui.select = original_select
   local agent = manager.list()[1]
   assert_equal(remembered_model, "gpt-fixture-fast", "new session defaults to the last model")
-  assert_equal(agent.managed_workspace.repository, "agent-manager", "focused repository")
+  local repository = root:match("/worktrees/([^/]+)/[^/]+$") or vim.fs.basename(root)
+  assert_equal(agent.managed_workspace.repository, repository:lower(), "focused repository")
   assert(agent.managed_workspace.task_id:match("^session%-"), "focused task uses a generated ID")
   assert_equal(agent.provider_options.effort, "high", "new session defaults to the last effort")
   manager.teardown()
@@ -1645,6 +1646,7 @@ local function session_workspace_store_test()
 end
 
 local function run()
+  dofile(root .. "/tests/lua/workflows.lua")()
   session_workspace_store_test()
   pure_client_resync_test()
   pure_client_revision_mismatch_test()
