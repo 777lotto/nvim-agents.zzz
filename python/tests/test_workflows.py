@@ -100,7 +100,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.write(attempt / "session.json", {"session_id": "saved-session"})
         self.write(
             attempt / "profile.json",
-            {"provider": "codex", "cwd": str(self.root), "history_available": True},
+            {"provider": "codex", "cwd": str(self.root / "collected"), "history_available": True},
         )
         client = AsyncMock()
         client.__aenter__.return_value = client
@@ -108,13 +108,14 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             read=AsyncMock(return_value=SimpleNamespace(thread=SimpleNamespace(turns=[])))
         )
         with (
-            patch.object(observation, "AsyncCodex", return_value=client),
+            patch.object(observation, "AsyncCodex", return_value=client) as constructor,
             patch.object(observation, "AsyncThread", return_value=thread) as handle,
         ):
             result = await observation.history(
                 self.root, "demo", "refactor", "replace-parser", attempt.name
             )
         self.assertEqual(result["session_id"], "saved-session")
+        self.assertEqual(constructor.call_args.args[0].cwd, str(self.root))
         handle.assert_called_once_with(client, "saved-session")
         thread.read.assert_awaited_once_with(include_turns=True)
         client.thread_resume.assert_not_called()

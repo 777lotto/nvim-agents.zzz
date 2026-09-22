@@ -193,7 +193,10 @@ async def history(
             if text:
                 messages.append({"role": record.type, "text": text[:20000]})
     elif info["provider"] == "codex":
-        async with AsyncCodex(CodexConfig(cwd=cwd, experimental_api=False)) as codex:
+        # Completed task worktrees may already be collected. History belongs
+        # to the provider session, not to the continued existence of its cwd.
+        observer_cwd = cwd if await asyncio.to_thread(Path(cwd).is_dir) else str(root)
+        async with AsyncCodex(CodexConfig(cwd=observer_cwd, experimental_api=False)) as codex:
             # Constructing a handle and reading history does not start/resume a writer.
             response = await AsyncThread(codex, session_id).read(include_turns=True)
             for turn in response.thread.turns[-100:]:
