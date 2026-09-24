@@ -28,7 +28,8 @@ return function()
   }, errors = {} }
   local system = vim.system
   vim.system = function(argv, _, callback)
-    local action = argv[5]
+    assert(argv[2] == "-B", "workflow reads must preserve the immutable runtime")
+    local action = argv[6]
     table.insert(reads, { action = action, args = argv })
     callback({ code = 0, stdout = vim.json.encode(action == "inspect" and snapshot or {
       version = 1, messages = { { role = "assistant", text = "Live session output" } }, notice = vim.NIL,

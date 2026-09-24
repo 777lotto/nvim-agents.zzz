@@ -22,7 +22,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        # macOS exposes its temporary directory through a /var symlink. The
+        # observer deliberately rejects symlinked paths, so use its real path.
+        self.root = Path(self.temporary.name).resolve()
         self.program = self.root / "demo" / "refactor"
         self.task = self.program / "tasks" / "replace-parser"
         self.task.mkdir(parents=True)

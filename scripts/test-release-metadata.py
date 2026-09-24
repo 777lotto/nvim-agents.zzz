@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
+import shutil
 import tarfile
 import tempfile
 import unittest
@@ -16,9 +18,34 @@ from release_metadata import (
     ReleaseError,
     parse_payload_checksums,
     safe_archive_members,
+    validate_compatibility,
     verify_manifest_shape,
     verify_outer_checksum,
 )
+
+
+class CompatibilityTests(unittest.TestCase):
+    def test_codex_workflow_sdk_pin_must_match(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative in (
+                "release/compatibility-v1.json",
+                "Cargo.toml",
+                "python/pyproject.toml",
+                "mise.toml",
+                "tests/ux-pins.env",
+            ):
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(repository / relative, destination)
+            validate_compatibility(root)
+            compatibility_path = root / "release/compatibility-v1.json"
+            compatibility = json.loads(compatibility_path.read_text(encoding="utf-8"))
+            compatibility["providers"]["openai_codex"] = "0.0.0"
+            compatibility_path.write_text(json.dumps(compatibility), encoding="utf-8")
+            with self.assertRaisesRegex(ReleaseError, "Codex workflow SDK"):
+                validate_compatibility(root)
 
 
 def tar_bytes(entries: Sequence[tuple[tarfile.TarInfo, bytes]]) -> bytes:

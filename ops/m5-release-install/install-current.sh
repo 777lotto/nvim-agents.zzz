@@ -172,7 +172,7 @@ else
       fi
     }
     trap cleanup_download EXIT
-    release_url="https://github.com/777lotto/agent-manager.nvimz/releases/download/v${release_version}"
+    release_url="https://github.com/777lotto/nvim-agents.zzz/releases/download/v${release_version}"
     log "downloading signed v$release_version release assets"
     curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
       "$release_url/$archive_name" --output "$temporary_download/$archive_name"
@@ -197,7 +197,7 @@ fi
 
 if test "${AGENT_MANAGER_REQUIRE_ATTESTATION:-0}" = 1; then
   command -v gh >/dev/null || fail "gh is required by AGENT_MANAGER_REQUIRE_ATTESTATION=1"
-  gh attestation verify "$archive" --repo 777lotto/agent-manager.nvimz >/dev/null
+  gh attestation verify "$archive" --repo 777lotto/nvim-agents.zzz >/dev/null
 fi
 
 # Refresh the selected asset paths after an offline/test override.

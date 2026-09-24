@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-manager-claude-worker"
-version = "0.1.0"
+version = "0.2.0"
 description = "Private Claude Agent SDK worker for agent-manager"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"

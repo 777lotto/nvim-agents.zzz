@@ -1403,6 +1403,13 @@ end
 
 local function managed_start_uses_focused_layout_without_inventory_test()
   local manager = require("agent_manager")
+  -- CI checkouts do not live at ~/repo or ~/worktrees/repo/task. Give this
+  -- layout-specific test its own canonical home instead of using the checkout.
+  local layout_home = vim.fn.tempname()
+  local layout_root = layout_home .. "/worktrees/focused-repo/existing-task"
+  vim.fn.mkdir(layout_root .. "/.git", "p")
+  local original_homedir = vim.uv.os_homedir
+  vim.uv.os_homedir = function() return layout_home end
   configure_fake(manager)
   assert(manager.open())
   await("focused-layout broker handshake", function()
@@ -1428,7 +1435,7 @@ local function managed_start_uses_focused_layout_without_inventory_test()
     end
   end
 
-  manager.start_ui({ cwd = root })
+  manager.start_ui({ cwd = layout_root })
   await("focused-layout prompt focus", function()
     local status = manager.status()
     return status.view.active_pane == "conversation"
@@ -1441,13 +1448,14 @@ local function managed_start_uses_focused_layout_without_inventory_test()
   end)
 
   vim.ui.select = original_select
+  vim.uv.os_homedir = original_homedir
   local agent = manager.list()[1]
   assert_equal(remembered_model, "gpt-fixture-fast", "new session defaults to the last model")
-  local repository = root:match("/worktrees/([^/]+)/[^/]+$") or vim.fs.basename(root)
-  assert_equal(agent.managed_workspace.repository, repository:lower(), "focused repository")
+  assert_equal(agent.managed_workspace.repository, "focused-repo", "focused repository")
   assert(agent.managed_workspace.task_id:match("^session%-"), "focused task uses a generated ID")
   assert_equal(agent.provider_options.effort, "high", "new session defaults to the last effort")
   manager.teardown()
+  vim.fn.delete(layout_home, "rf")
   vim.wait(500, function()
     return false
   end, 25, false)

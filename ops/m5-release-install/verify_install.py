@@ -128,6 +128,28 @@ def verify(spec: VerificationInput) -> dict[str, Any]:
     ):
         raise VerificationError("Claude worker runtime differs from release compatibility metadata")
 
+    workflow_sdk = run_json(
+        [
+            str(spec.worker_python),
+            "-B",
+            "-I",
+            "-c",
+            "import importlib.metadata, json; "
+            "print(json.dumps({'version': importlib.metadata.version('openai-codex')}))",
+        ],
+        "Codex workflow SDK version",
+    )
+    if workflow_sdk.get("version") != providers.get("openai_codex"):
+        raise VerificationError("Codex workflow SDK differs from release compatibility metadata")
+    workflow = subprocess.run(
+        [str(spec.worker_python), "-B", "-I", "-m", "agent_manager_workflows", "--help"],
+        check=False,
+        capture_output=True,
+        timeout=30,
+    )
+    if workflow.returncode != 0:
+        raise VerificationError("workflow runtime entrypoint failed")
+
     python_root = spec.release / "python/lib/python3.13/site-packages"
     python_files = [path for path in python_root.rglob("*") if path.is_file()]
     return {
@@ -142,6 +164,8 @@ def verify(spec: VerificationInput) -> dict[str, Any]:
         "python_file_count": len(python_files),
         "python_byte_count": sum(path.stat().st_size for path in python_files),
         "worker_protocol_version": result_object.get("protocol_version"),
+        "workflow_runtime_verified": True,
+        "openai_codex_version": workflow_sdk.get("version"),
     }
 
 

@@ -91,7 +91,7 @@ function Workflows:request(action, arguments, callback)
     callback(nil, "Install the Agent Manager workflow runtime or configure workflows.python")
     return
   end
-  local argv = { self.opts.python, "-I", "-m", "agent_manager_workflows", action }
+  local argv = { self.opts.python, "-B", "-I", "-m", "agent_manager_workflows", action }
   if self.opts.root then vim.list_extend(argv, { "--root", self.opts.root }) end
   vim.list_extend(argv, arguments or {})
   local ok, process = pcall(vim.system, argv, { text = true, timeout = 15000 }, function(result)
