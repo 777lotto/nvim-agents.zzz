@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.27,<2"]
+requires = ["hatchling<2,>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -11,7 +11,7 @@ requires-python = ">=3.13,<3.14"
 license = "MIT"
 authors = [{ name = "zemrip-ai" }]
 dependencies = [
-    "claude-agent-sdk==0.2.152",
+    "claude-agent-sdk==0.2.157",
     "openai-codex==0.155.1",
 ]
 
@@ -20,7 +20,7 @@ agent-manager-claude-worker = "agent_manager_claude_worker.__main__:main"
 
 [dependency-groups]
 dev = [
-  "hatchling==1.32.0",
+  "hatchling==1.32.4",
   "jsonschema>=4.25,<5",
   "pyright>=1.1.405,<2",
   "ruff>=0.12,<1",
