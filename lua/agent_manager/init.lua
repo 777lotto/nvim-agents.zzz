@@ -1895,6 +1895,28 @@ function M.resume_session_ui(session)
     return
   end
 
+  -- CLI sessions can live outside Git (for example, in the home directory).
+  -- There is no checkout to lease there, and a global cleanup audit is both
+  -- unnecessary and too expensive for opening a saved conversation.
+  local cwd = type(session.cwd) == "string" and vim.uv.fs_realpath(session.cwd) or nil
+  local home = vim.uv.os_homedir()
+  local task_root = home and (home .. "/worktrees") or nil
+  if session.provider == "codex" and cwd and vim.fn.isdirectory(cwd) == 1
+    and not vim.fs.root(cwd, { ".git" }) and not path_within(cwd, task_root)
+  then
+    local ok, resume_err = M.resume({
+      provider = session.provider,
+      provider_session_id = session.provider_session_id,
+      provider_options = session.provider_options or remembered_provider_options[session.provider],
+      cwd = cwd,
+      workspace_strategy = "shared",
+    }, function(result, err)
+      if not err then resume_notice(session, result) end
+    end)
+    if not ok and resume_err then report(resume_err) end
+    return
+  end
+
   vim.notify("Agent Manager: finding a safe workspace for the saved session…")
   load_workspace_inventory(function(repositories)
     if not repositories then

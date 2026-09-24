@@ -1637,6 +1637,63 @@ local function resume_test()
   manager.teardown()
 end
 
+local function codex_directory_resume_test()
+  local manager = require("agent_manager")
+  configure_fake(manager)
+  local directory = vim.fn.tempname()
+  vim.fn.mkdir(directory, "p")
+  local original_resume, original_workspaces = manager.resume, manager.workspaces
+  local attempts, inventories = {}, 0
+  manager.resume = function(opts)
+    attempts[#attempts + 1] = opts
+    return true
+  end
+  manager.workspaces = function(callback)
+    inventories = inventories + 1
+    callback({ repositories = {} })
+  end
+  local session = {
+    provider = "codex", provider_session_id = "cli-directory-resume",
+    cwd = directory .. "/", external = true, activity_known = true,
+    provider_options = { model = "saved-model" },
+  }
+  manager.resume_session_ui(session)
+  assert_equal(#attempts, 1, "CLI Codex session resumes")
+  assert_equal(inventories, 0, "plain directory resume never waits for lifecycle inventory")
+  assert_equal(attempts[1].provider_session_id, session.provider_session_id, "original Codex identity")
+  assert_equal(attempts[1].cwd, vim.uv.fs_realpath(directory), "original directory is preserved")
+  assert_equal(attempts[1].workspace_strategy, "shared", "plain directory needs no Git worktree")
+  assert_equal(attempts[1].provider_options, session.provider_options, "saved model is preserved")
+
+  session.external_active = true
+  manager.resume_session_ui(session)
+  session.external_active = nil
+  session.activity_known = false
+  manager.resume_session_ui(session)
+  assert_equal(#attempts, 1, "active or uncertain sessions cannot acquire a second writer")
+  session.activity_known = true
+
+  session.provider = "claude"
+  manager.resume_session_ui(session)
+  assert_equal(inventories, 1, "Claude keeps its existing lifecycle path")
+  session.provider = "codex"
+  vim.fn.writefile({ "gitdir: /missing/gitdir" }, directory .. "/.git")
+  manager.resume_session_ui(session)
+  assert_equal(inventories, 2, "broken Git markers cannot bypass workspace discovery")
+  vim.fn.delete(directory .. "/.git")
+
+  local mappings = require("agent_manager.session_workspace")
+  assert(mappings.save(session, { repository = "demo", task_id = "original-task" }))
+  manager.resume_session_ui(session)
+  assert_equal(attempts[#attempts].managed_workspace, {
+    repository = "demo", task_id = "original-task", resume = true,
+  }, "saved mappings take precedence over a stale non-Git cwd")
+  assert_equal(attempts[#attempts].cwd, nil, "mapped session cannot fall back to a plain directory")
+  manager.resume, manager.workspaces = original_resume, original_workspaces
+  manager.teardown()
+  vim.fn.delete(directory, "rf")
+end
+
 local function session_workspace_store_test()
   local mappings = require("agent_manager.session_workspace")
   local session = { provider = "codex", provider_session_id = "workspace-store-test" }
@@ -1675,6 +1732,7 @@ local function run()
   managed_decision_render_test()
   integration_test()
   resume_test()
+  codex_directory_resume_test()
   print("Agent Manager Lua M4 tests passed")
 end
 

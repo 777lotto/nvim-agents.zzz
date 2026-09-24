@@ -1280,6 +1280,78 @@ async fn managed_workspace_resume_claims_the_saved_task_before_provider_resume()
 }
 
 #[tokio::test]
+async fn codex_directory_resume_skips_lifecycle_with_shared_starts_disabled() {
+    completes_within(async {
+        let fixture = ManagedWorkspaceFixture::new();
+        let mut harness = start_managed_harness(&fixture).await;
+
+        // The exception is specific to Codex resume outside a checkout.
+        let canonical = fixture.root.join("canonical");
+        let nested = canonical.join("nested");
+        fs::create_dir(&nested).expect("create nested checkout directory");
+        let broken = fixture.root.join("broken-checkout");
+        fs::create_dir(&broken).expect("create broken checkout directory");
+        fs::write(broken.join(".git"), "gitdir: /missing/gitdir\n")
+            .expect("write broken Git marker");
+        for (id, method, provider, cwd) in [
+            (2, "agent/start", "codex", &fixture.root),
+            (3, "agent/resume", "claude", &fixture.root),
+            (4, "agent/resume", "codex", &canonical),
+            (5, "agent/resume", "codex", &nested),
+            (6, "agent/resume", "codex", &fixture.worktree),
+            (7, "agent/resume", "codex", &broken),
+        ] {
+            let mut params = json!({
+                "provider": provider, "cwd": cwd, "workspace_strategy": "shared"
+            });
+            if method == "agent/resume" {
+                params["provider_session_id"] = json!("thread-resumable");
+            }
+            harness.send(request(id, method, params)).await;
+            assert_eq!(harness.response(id).await["error"]["code"], -32_031);
+        }
+
+        harness
+            .send(request(
+                8,
+                "agent/resume",
+                json!({
+                    "provider": "codex", "provider_session_id": "thread-resumable",
+                    "cwd": fixture.root, "workspace_strategy": "shared"
+                }),
+            ))
+            .await;
+        let resumed = harness.response(8).await;
+        let agent = &resumed["result"]["agent"];
+        assert_eq!(agent["provider_session_id"], "thread-resumable");
+        assert_eq!(agent["cwd"], fixture.root.to_string_lossy().as_ref());
+        assert_eq!(agent["workspace_strategy"], "shared");
+        assert!(agent["managed_workspace"].is_null());
+        harness.state("idle").await;
+        harness
+            .send(request(
+                9,
+                "agent/history",
+                json!({ "agent_id": agent["id"] }),
+            ))
+            .await;
+        let history = harness.response(9).await;
+        assert!(
+            history["result"]["messages"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        );
+        assert!(
+            !fixture.marker.exists(),
+            "directory resume must never invoke lifecycle"
+        );
+        harness.shutdown(10).await;
+    })
+    .await
+    .expect("Codex directory resume timed out");
+}
+
+#[tokio::test]
 async fn codex_embedded_flow_resumes_one_specific_provider_session() {
     completes_within(prove_specific_resume(Provider::Codex, "thread-resumable"))
         .await

@@ -211,6 +211,10 @@ agent-manager/session-workspaces/ so an editor restart or stale provider cwd
 cannot assign another workspace. Older canonical-only sessions receive a stable
 automatic task ID. Missing worktrees or conflicting/unreadable associations
 require recovery; resume never creates a replacement for a saved mapping.
+Codex CLI sessions outside Git (for example, in the home directory) resume in
+their original directory without lifecycle inventory when no managed association
+exists. This Codex-only resume is permitted with shared-checkout starts disabled;
+Git checkouts, the managed worktree namespace, and new starts retain that policy.
 
 The key at the top maps `● Codex` and `◆ Claude` plus `● active`, `○ resume`,
 `? check`, and `× ended` to their semantic colors. Session rows show only the

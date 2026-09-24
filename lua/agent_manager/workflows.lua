@@ -63,6 +63,7 @@ function Workflows:layout()
   vim.api.nvim_win_set_buf(self.windows.detail, self:_buffer("detail"))
   for _, window in pairs(self.windows) do
     vim.wo[window].wrap = true
+    vim.wo[window].linebreak = true
     vim.wo[window].number = false
     vim.wo[window].relativenumber = false
     vim.wo[window].winfixheight = false
