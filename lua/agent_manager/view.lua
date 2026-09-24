@@ -3,6 +3,13 @@ View.__index = View
 
 local pane_names = { "agents", "conversation", "activity" }
 
+-- The transcript is Markdown source. Registering the pane's own filetype as a
+-- Markdown dialect lets Neovim's bundled parser highlight it and lets an
+-- installed render-markdown.nvim (when its `file_types` names this filetype)
+-- draw headings, tables, and code fences without changing the buffer text.
+local conversation_filetype = "agent-manager-conversation"
+local conversation_language = "markdown"
+
 local function valid_buffer(buffer)
   return buffer ~= nil and vim.api.nvim_buf_is_valid(buffer)
 end
@@ -489,6 +496,9 @@ function View:_buffer(name)
     plugin_id = "agent.manager",
     pane = name,
   }
+  if name == "conversation" then
+    self:_attach_conversation_markdown(buffer)
+  end
   if name == "prompt" then
     self:_map_prompt_buffer(buffer)
     vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
@@ -503,6 +513,17 @@ function View:_buffer(name)
     self:_map_buffer(buffer)
   end
   return buffer
+end
+
+function View:_attach_conversation_markdown(buffer)
+  self.markdown = { enabled = self.opts.conversation_markdown ~= false, active = false }
+  if not self.markdown.enabled then
+    return false
+  end
+  local registered = pcall(vim.treesitter.language.register, conversation_language, conversation_filetype)
+  local started = registered and pcall(vim.treesitter.start, buffer, conversation_language)
+  self.markdown.active = started == true
+  return self.markdown.active
 end
 
 function View:_map_windows(buffer)
@@ -1635,12 +1656,16 @@ function View:_render_conversation()
       if message.role == "system" then
         label = "SYSTEM"
       end
-      table.insert(lines, " " .. inline(label))
+      -- A level-two heading keeps the label a Markdown block of its own, so
+      -- the reply below cannot merge into it or turn it into a setext
+      -- heading, and Markdown renderers draw it as a section divider.
+      table.insert(lines, " ## " .. inline(label))
       table.insert(highlights, {
         line = #lines,
         group = message.role == "system" and "AgentManagerMessageSystem"
           or "AgentManagerMessageAssistant",
       })
+      table.insert(lines, "")
     end
     for _, line in ipairs(text_lines(message.text)) do
       table.insert(lines, " " .. line)
@@ -1977,6 +2002,7 @@ function View:status()
     home = self.home,
     buffers = vim.deepcopy(self.buffers),
     windows = vim.deepcopy(self.windows),
+    markdown = vim.deepcopy(self.markdown or { enabled = self.opts.conversation_markdown ~= false, active = false }),
     backend = "native",
   }
 end
