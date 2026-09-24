@@ -661,9 +661,19 @@ local function transcript_presentation_test()
   })
   assert(view:open())
   local buffer = view.buffers.conversation
-  assert(buffer_has_line(buffer, " gpt-6-astra"), "assistant label names the active model")
+  assert(buffer_has_line(buffer, " ## gpt-6-astra"), "assistant label names the active model as a heading")
   assert(not buffer_has_line(buffer, " YOU"), "user messages have no speaker heading")
+  assert(not buffer_has_line(buffer, " ## YOU"), "user messages have no speaker heading")
   assert(not buffer_has_line(buffer, " ASSISTANT"), "generic assistant heading is removed")
+  local label_row = buffer_line_number(buffer, " ## gpt-6-astra")
+  local after_label = vim.api.nvim_buf_get_lines(buffer, label_row, label_row + 2, false)
+  assert(after_label[1] == "", "a blank line separates the label from the reply")
+  assert(after_label[2] == " Reply with **Markdown** intact.", "the reply follows the blank line")
+  assert(vim.bo[buffer].filetype == "agent-manager-conversation", "conversation keeps its pane filetype")
+  assert(vim.treesitter.language.get_lang("agent-manager-conversation") == "markdown",
+    "conversation filetype resolves to the markdown parser")
+  assert(vim.treesitter.highlighter.active[buffer], "markdown treesitter highlighting is attached")
+  assert(view:status().markdown.active, "view status reports markdown as active")
   local function highlighted(line, group)
     local row = buffer_line_number(buffer, line) - 1
     for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buffer, view.namespace, { row, 0 }, { row, -1 }, { details = true })) do
@@ -675,7 +685,7 @@ local function transcript_presentation_test()
   end
   assert(highlighted("my first line", "AgentManagerMessageUser"), "first user line is purple")
   assert(highlighted("my second line", "AgentManagerMessageUser"), "all user lines are purple")
-  assert(highlighted(" gpt-6-astra", "AgentManagerMessageAssistant"), "model label is blue")
+  assert(highlighted(" ## gpt-6-astra", "AgentManagerMessageAssistant"), "model label is blue")
   assert(not highlighted("Reply with", "AgentManagerMessageAssistant"), "assistant body stays neutral")
   assert(buffer_contains(buffer, "**Markdown**"), "source formatting is preserved")
   model.agents["transcript-agent"].provider_options.model = "another-model"
@@ -685,11 +695,19 @@ local function transcript_presentation_test()
     type = "message.delta", payload = { delta = "Another reply" },
   })
   view:render()
-  assert(buffer_has_line(buffer, " gpt-6-astra"), "completed responses retain their model")
-  assert(buffer_has_line(buffer, " another-model"), "new response uses the new model")
+  assert(buffer_has_line(buffer, " ## gpt-6-astra"), "completed responses retain their model")
+  assert(buffer_has_line(buffer, " ## another-model"), "new response uses the new model")
   assert(not buffer_contains(buffer, "YOU · STEER"), "steering has no YOU heading")
   assert(highlighted("steering text", "AgentManagerMessageUser"), "steering text is purple")
   view:teardown()
+
+  local plain = View.new(model, {}, { home = vim.fn.tempname(), conversation_markdown = false })
+  assert(plain:open())
+  local plain_buffer = plain.buffers.conversation
+  assert(buffer_has_line(plain_buffer, " ## gpt-6-astra"), "labels stay Markdown headings without rendering")
+  assert(not vim.treesitter.highlighter.active[plain_buffer], "ui.conversation_markdown=false leaves the parser detached")
+  assert(not plain:status().markdown.active, "view status reports markdown as inactive")
+  plain:teardown()
 end
 
 local function native_presentation_test()

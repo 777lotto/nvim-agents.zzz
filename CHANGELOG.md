@@ -14,6 +14,14 @@ and releases use Semantic Versioning.
   `~/nvim-foundation`, `~/nvim-styler`, and `~/nvim-chrome`, and `mise run
   setup` pins uv to the Mise-managed Python 3.13.15 (`UV_PYTHON`, downloads
   refused) instead of whichever CPython is first on `PATH`.
+### Added
+
+- The Conversation transcript is parsed as Markdown: its filetype is registered
+  with the bundled `markdown` treesitter parser, model labels are `##`
+  headings followed by a blank line, and render-markdown.nvim can draw the
+  pane by listing `agent-manager-conversation` in its `file_types`.
+  `ui.conversation_markdown = false` restores the plain transcript.
+  `:checkhealth agent-manager` reports the parser state.
 
 ## [0.1.0] - Unreleased
 

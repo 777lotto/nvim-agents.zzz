@@ -118,6 +118,7 @@ local function defaults()
       prompt_max_height = 12,
       external_sessions = true,
       external_session_limit = 1000,
+      conversation_markdown = true,
     },
     root = root,
   }
@@ -295,6 +296,9 @@ function M.resolve(opts)
   end
   if type(config.ui.external_sessions) ~= "boolean" then
     return nil, { kind = "configuration", message = "ui.external_sessions must be a boolean" }
+  end
+  if type(config.ui.conversation_markdown) ~= "boolean" then
+    return nil, { kind = "configuration", message = "ui.conversation_markdown must be a boolean" }
   end
   if
     type(config.ui.external_session_limit) ~= "number"
