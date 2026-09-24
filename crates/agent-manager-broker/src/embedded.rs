@@ -1155,6 +1155,28 @@ impl Broker {
         })
     }
 
+    fn workspace_launch_allowed(
+        &self,
+        request_id: &RequestId,
+        provider: Provider,
+        workspace: &ResolvedWorkspace,
+        launch: &SessionLaunch,
+    ) -> bool {
+        if workspace.strategy == WorkspaceStrategy::Shared
+            && !self.config.allow_shared_workspaces
+            && !is_codex_directory_resume(provider, launch, &workspace.cwd)
+        {
+            self.send(error_response(
+                Some(request_id.clone()),
+                -32_031,
+                "Shared-checkout starts are disabled by broker policy",
+                None,
+            ));
+            return false;
+        }
+        true
+    }
+
     fn launch_agent(
         &mut self,
         request_id: RequestId,
@@ -1163,21 +1185,15 @@ impl Broker {
         provider_options: ProviderOptions,
         launch: SessionLaunch,
     ) -> Option<String> {
+        if !self.workspace_launch_allowed(&request_id, provider, &workspace, &launch) {
+            return None;
+        }
         let ResolvedWorkspace {
             cwd,
             strategy: workspace_strategy,
             worktree_path,
             managed: managed_workspace,
         } = workspace;
-        if workspace_strategy == WorkspaceStrategy::Shared && !self.config.allow_shared_workspaces {
-            self.send(error_response(
-                Some(request_id),
-                -32_031,
-                "Shared-checkout starts are disabled by broker policy",
-                None,
-            ));
-            return None;
-        }
         if self.mode == BrokerMode::Embedded
             && self.agents.values().any(|agent| agent.task.is_some())
         {
@@ -2581,6 +2597,30 @@ fn checkout_identity(strategy: WorkspaceStrategy, cwd: &Path) -> PathBuf {
         return cwd.to_owned();
     }
     git_top_level(cwd).unwrap_or_else(|| cwd.to_owned())
+}
+
+fn is_codex_directory_resume(provider: Provider, launch: &SessionLaunch, cwd: &Path) -> bool {
+    // A saved Codex CLI conversation may live outside any Git checkout.
+    // Only this resume bypasses the administrator's shared-checkout policy.
+    if provider != Provider::Codex || !matches!(launch, SessionLaunch::Resume(_)) {
+        return false;
+    }
+    // Broken Git markers must not turn a checkout into an allowed directory.
+    // Also preserve the workstation's managed worktree namespace.
+    if std::env::var_os("HOME")
+        .is_some_and(|home| cwd.starts_with(Path::new(&home).join("worktrees")))
+    {
+        return false;
+    }
+    if cwd.ancestors().any(|path| {
+        !matches!(
+            fs::symlink_metadata(path.join(".git")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        )
+    }) {
+        return false;
+    }
+    git_top_level(cwd).is_none()
 }
 
 fn git_top_level(cwd: &Path) -> Option<PathBuf> {

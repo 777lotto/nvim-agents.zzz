@@ -419,6 +419,13 @@ workspace name during resume. Unreadable or conflicting associations stop resume
 for recovery; an unavailable mapped worktree is reported by the lifecycle
 authority without creating a replacement.
 
+Codex sessions created through the CLI in a directory outside Git, such as the
+home directory, resume in that original directory without running the lifecycle
+inventory. This applies only when there is no saved managed-workspace association;
+Git checkouts and the managed worktree namespace retain their existing rules.
+The broker permits this Codex resume even with shared-checkout starts disabled.
+Claude resume and new-session policies are unchanged.
+
 Known lifecycle refusals include a safe explanation in the session-start error
 (for example, a dirty canonical checkout, a busy lease, or missing Mise trust).
 Unknown refusals retain the generic message. Raw lifecycle diagnostics are never
