@@ -105,6 +105,30 @@ function M.check()
     "known agents: " .. tostring(#(health.agents or {})) .. ", disconnected/stale: " .. tostring(disconnected)
   )
 
+  local markdown = health.markdown or {}
+  if markdown.enabled == false then
+    vim.health.info("conversation Markdown: disabled by ui.conversation_markdown")
+  elseif markdown.active then
+    vim.health.ok("conversation Markdown: treesitter highlighting is attached")
+  elseif vim.treesitter.language.get_lang("agent-manager-conversation") == "markdown" then
+    vim.health.warn("conversation Markdown: the markdown parser did not start", {
+      "Neovim bundles the markdown and markdown_inline parsers; check :checkhealth vim.treesitter",
+    })
+  else
+    vim.health.info("conversation Markdown: attaches when the workspace opens")
+  end
+  if vim.api.nvim_get_runtime_file("lua/render-markdown/init.lua", false)[1] then
+    local renderer_state = package.loaded["render-markdown.state"]
+    local file_types = type(renderer_state) == "table" and renderer_state.file_types or nil
+    if type(file_types) == "table" and vim.list_contains(file_types, "agent-manager-conversation") then
+      vim.health.ok("render-markdown.nvim lists agent-manager-conversation and draws the transcript")
+    else
+      vim.health.info(
+        "render-markdown.nvim is installed; add agent-manager-conversation to its file_types to draw the transcript"
+      )
+    end
+  end
+
   local ux = health.ux or {}
   local foundation = ux.foundation or {}
   if foundation.registered then

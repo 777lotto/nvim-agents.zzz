@@ -51,6 +51,7 @@ configuration pins.
         prompt_max_height = 12,
         external_sessions = true,
         external_session_limit = 1000,
+        conversation_markdown = true,
       },
     })
 <
@@ -168,9 +169,20 @@ Activity notice. Up to 32 prompts can wait in broker memory; they do not survive
 a broker restart. ts still steers the current turn. Token totals remain visible,
 but usage.updated events do not appear in the Activity log.
 
-Conversation labels assistant replies with the model name in blue. User messages
-have no YOU heading and use purple text. Per-label font sizes are unavailable in
-the native Neovim text grid. Markdown remains source text in this transcript.
+Conversation labels assistant replies with the model name in blue. The label
+is a level-two Markdown heading (`## model-name`) followed by a blank line, so
+the reply is its own Markdown block. User messages have no YOU heading and use
+purple text. Per-label font sizes are unavailable in the native Neovim text
+grid.
+
+The transcript is Markdown source and keeps provider text verbatim. Its
+buffer filetype stays `agent-manager-conversation`, registered as a dialect of
+the bundled `markdown` treesitter parser, so headings, code fences, tables, and
+inline code take the colorscheme's Markdown highlights. An installed
+render-markdown.nvim draws the transcript once `agent-manager-conversation` is
+listed in its `file_types`; Agent Manager's own message highlights are applied
+above the renderer's and stay in effect. Set `ui.conversation_markdown = false`
+to keep the transcript unparsed.
 
 Activity shows file patches supplied by the provider with diff highlighting.
 The df command opens a workspace diff snapshot in Activity; repeat df to refresh.

@@ -2583,6 +2583,8 @@ function M.health()
     worktrees = config and vim.deepcopy(config.worktrees) or nil,
     agents = status.model and status.model.agents or {},
     ux = runtime and runtime.ux:status() or UX.detect(),
+    markdown = status.view and status.view.markdown
+      or { enabled = config and config.ui.conversation_markdown ~= false, active = false },
   }
 end
 

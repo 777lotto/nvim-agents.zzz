@@ -251,10 +251,19 @@ restart. Explicit steering (`ts`) still sends input to the current turn.
 Token totals remain visible, but `usage.updated` events are omitted from the
 Activity log.
 
-Conversation shows the responding model in a blue, unbolded label. User messages
-have no speaker heading and their text is purple. Neovim's text grid cannot use
-a smaller font for individual labels. Provider text, including Markdown markers,
-is preserved; the transcript does not currently render Markdown formatting.
+Conversation shows the responding model in a blue, unbolded label written as a
+level-two Markdown heading (`## model-name`) with a blank line after it. User
+messages have no speaker heading and their text is purple. Neovim's text grid
+cannot use a smaller font for individual labels.
+
+The transcript keeps provider text verbatim as Markdown source. Its
+`agent-manager-conversation` filetype is registered as a dialect of Neovim's
+bundled `markdown` treesitter parser, so headings, code fences, tables, and
+inline code are highlighted from the colorscheme. A Neovim configuration that
+installs render-markdown.nvim gets the drawn transcript by adding
+`agent-manager-conversation` to that plugin's `file_types`; Agent Manager's own
+label and user-message highlights are applied on top and remain visible. Set
+`ui.conversation_markdown = false` to leave the transcript unparsed.
 
 Activity displays provider-supplied file patches with diff highlighting. `df`
 shows a workspace diff in Activity, including when the provider does not supply
