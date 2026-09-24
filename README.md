@@ -347,9 +347,18 @@ mise run verify
 mise run ux-test
 ```
 
-The M5 gate resolves registered UX checkouts automatically. Elsewhere,
-set `UX_FOUNDATION_ROOT`, `UX_STYLING_ROOT`, and `UX_CHROME_ROOT` to checkouts
-containing the promoted commits recorded in `tests/ux-pins.env`.
+The M5 gate resolves registered UX checkouts automatically: a sibling
+`UX-*.nvim` checkout beside the repository or its parent directory, then the
+zemrip canonical clones `~/nvim-foundation`, `~/nvim-styler`, and
+`~/nvim-chrome`, which an agent worktree under `~/worktrees/` reads without
+modifying. Elsewhere, set `UX_FOUNDATION_ROOT`, `UX_STYLING_ROOT`, and
+`UX_CHROME_ROOT` to checkouts containing the promoted commits recorded in
+`tests/ux-pins.env`.
+
+`mise run setup` pins uv to the Mise-managed Python 3.13.15 through `UV_PYTHON`
+and refuses interpreter downloads, so `python/.venv` never picks up a system
+CPython that happens to sit earlier on `PATH`; the release build checks that
+exact version. A missing interpreter is fixed with `mise install`.
 
 Useful diagnostic commands after a build:
 
