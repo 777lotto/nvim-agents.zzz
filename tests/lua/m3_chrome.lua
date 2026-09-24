@@ -127,6 +127,20 @@ h.finish(function()
   end
   h.equal(surface_options(), opening_surfaces, "Agent Manager wrote a Chrome-owned surface")
 
+  local pane_api_ok, panes = pcall(require, "ux_chrome.panes")
+  if pane_api_ok then
+    local conversation = status.view.windows.conversation
+    -- The approval temporarily replaces the conversation window with context.
+    h.equal(panes.inspect(conversation).role, "context", "approval pane role")
+    h.equal(panes.inspect(conversation).content, "plaintext", "approval content")
+    local tx = h.truthy(foundation.begin_transaction())
+    h.truthy(tx:stage("ux.chrome.panes/context/wrap/value", false))
+    h.equal(vim.wo[conversation].wrap, false, "shared wrap did not reach conversation")
+    h.truthy(tx:revert())
+    h.truthy(tx:commit())
+    h.equal(vim.wo[conversation].wrap, true, "shared wrap revert")
+  end
+
   local health = manager.health().ux
   h.equal(health.chrome.available, true, "Chrome presence")
   h.equal(health.chrome.segment_available, false, "unexpected private Chrome segment use")

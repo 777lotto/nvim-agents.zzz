@@ -534,3 +534,11 @@ exact tagged commit. The release workflow invokes the isolated notifier as a
 dependent reusable job, while its manual trigger provides a recovery path. The
 operator provisions the repository-scoped `NVIM_CONFIG_DISPATCH_TOKEN`; the
 credential-free agent plane never receives its value.
+# Shared pane presentation
+
+When UX Chrome's `ux_chrome.panes` API is available, Agent Manager attaches its
+navigation, conversation, activity, approval, and input windows to shared pane
+roles. Foundation/Styling can edit role defaults or individual pane overrides
+without changing Agent Manager's content or actions. The conversation declares
+Markdown content unless `ui.conversation_markdown` is disabled. Older Chrome
+versions and installations without Chrome retain the native presentation.
