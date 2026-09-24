@@ -7,6 +7,13 @@ and releases use Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- `mise run verify` in an agent worktree no longer needs manual pointing:
+  `scripts/test-ux.sh` also discovers the zemrip canonical clones
+  `~/nvim-foundation`, `~/nvim-styler`, and `~/nvim-chrome`, and `mise run
+  setup` pins uv to the Mise-managed Python 3.13.15 (`UV_PYTHON`, downloads
+  refused) instead of whichever CPython is first on `PATH`.
 ### Added
 
 - The Conversation transcript is parsed as Markdown: its filetype is registered

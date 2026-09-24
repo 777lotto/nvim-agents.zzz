@@ -18,6 +18,11 @@ trap report_failure ERR
 # shellcheck disable=SC1091
 source "$repo_root/tests/ux-pins.env"
 
+# Candidates, in order: an explicit *_ROOT override, a sibling checkout named
+# after the upstream repository, the zemrip canonical clone under $HOME (the
+# common case for an agent worktree, which lives two directories deeper), and
+# the legacy operator paths. Read-only: only the pinned commit's ancestry is
+# checked, so a canonical coordination clone is safe to use.
 resolve_checkout() {
   local configured="$1"
   shift
@@ -40,6 +45,7 @@ ux_stage="pinned UX checkout discovery"
 foundation_root="$(resolve_checkout "${UX_FOUNDATION_ROOT:-}" \
   "$repo_root/UX-foundation.nvim" \
   "$(dirname "$repo_root")/UX-foundation.nvim" \
+  "${HOME:-/home/ai}/nvim-foundation" \
   "/home/ai/ux-foundation")" || {
     echo "UX Foundation checkout not found; set UX_FOUNDATION_ROOT" >&2
     exit 1
@@ -47,6 +53,7 @@ foundation_root="$(resolve_checkout "${UX_FOUNDATION_ROOT:-}" \
 styling_root="$(resolve_checkout "${UX_STYLING_ROOT:-}" \
   "$repo_root/UX-styling.nvim" \
   "$(dirname "$repo_root")/UX-styling.nvim" \
+  "${HOME:-/home/ai}/nvim-styler" \
   "/home/ai/ux-styling")" || {
     echo "UX Styling checkout not found; set UX_STYLING_ROOT" >&2
     exit 1
@@ -54,6 +61,7 @@ styling_root="$(resolve_checkout "${UX_STYLING_ROOT:-}" \
 chrome_root="$(resolve_checkout "${UX_CHROME_ROOT:-}" \
   "$repo_root/UX-chrome.nvim" \
   "$(dirname "$repo_root")/UX-chrome.nvim" \
+  "${HOME:-/home/ai}/nvim-chrome" \
   "/home/ai/ux-chrome")" || {
     echo "UX Chrome checkout not found; set UX_CHROME_ROOT" >&2
     exit 1

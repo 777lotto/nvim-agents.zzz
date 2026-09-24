@@ -6,6 +6,15 @@ shellcheck = "0.11.0"
 uv = "0.12.7"
 neovim = "0.12.4"
 
+# uv discovers interpreters through PATH, and an already-activated shell can
+# leave /usr/bin ahead of this project's Mise tools, so a system CPython of the
+# same minor series would silently seed python/.venv and fail the release
+# build's exact-version check. Pin the request to the Mise-managed version and
+# refuse downloads so a missing install surfaces as `mise install`.
+[env]
+UV_PYTHON = "3.13.15"
+UV_PYTHON_DOWNLOADS = "never"
+
 [tasks.setup]
 description = "Install the locked Python worker environment"
 dir = "python"
