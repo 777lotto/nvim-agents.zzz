@@ -4,7 +4,15 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 phase="$repo_root/ops/m5-release-install"
 artifact_dir="${RELEASE_TEST_ARTIFACT_DIR:?RELEASE_TEST_ARTIFACT_DIR is required}"
-archive="$artifact_dir/agent-manager-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+read -r release_version release_target < <(
+  "$repo_root/python/.venv/bin/python" -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    compatibility = json.load(handle)
+print(compatibility["release_version"], compatibility["target"])
+' "$repo_root/release/compatibility-v1.json"
+)
+archive="$artifact_dir/agent-manager-v${release_version}-${release_target}.tar.gz"
 checksums="$artifact_dir/SHA256SUMS"
 test -f "$archive"
 test -f "$checksums"
@@ -19,11 +27,11 @@ trap cleanup EXIT
 
 install_root="$test_root/share/agent-manager"
 releases_dir="$install_root/releases"
-release_dir="$releases_dir/v0.1.0-x86_64-unknown-linux-gnu"
+release_dir="$releases_dir/v${release_version}-${release_target}"
 broker_link="$test_root/bin/agent-manager-broker"
 venv_link="$install_root/venv"
 state_root="$test_root/state"
-state_dir="$state_root/v0.1.0-x86_64-unknown-linux-gnu"
+state_dir="$state_root/v${release_version}-${release_target}"
 status_file="$state_dir/status.json"
 env_file="$test_root/m5-test.env"
 
@@ -39,8 +47,8 @@ ln -s "$releases_dir/v0.0.0/python" "$venv_link"
   printf 'SERVICE_UNIT=agent-manager-m5-test.service\n'
   printf 'SERVICE_STATE_CHECK=test-none\n'
   printf 'REQUIRE_CLEAN_SOURCE=0\n'
-  printf 'RELEASE_VERSION=0.1.0\n'
-  printf 'RELEASE_TARGET=x86_64-unknown-linux-gnu\n'
+  printf 'RELEASE_VERSION=%s\n' "$release_version"
+  printf 'RELEASE_TARGET=%s\n' "$release_target"
   printf 'RELEASE_ARCHIVE=%s\n' "$archive"
   printf 'RELEASE_CHECKSUMS=%s\n' "$checksums"
   printf 'RELEASE_SOURCE_REVISION=%s\n' "$(git -C "$repo_root" rev-parse HEAD)"
@@ -67,6 +75,10 @@ test "$(readlink -- "$broker_link")" = "$release_dir/bin/agent-manager-broker"
 test "$(readlink -- "$venv_link")" = "$release_dir/python"
 test -s "$status_file"
 grep '"last_error": null' "$status_file" >/dev/null
+grep '"workflow_runtime_verified": true' "$status_file" >/dev/null
+"$venv_link/bin/python" -B -I -m agent_manager_workflows --help >/dev/null
+# The queue entrypoint must leave the immutable payload verifiable.
+"$phase/90-verify.sh"
 
 "$phase/undo-20.sh"
 "$phase/undo-20.sh"

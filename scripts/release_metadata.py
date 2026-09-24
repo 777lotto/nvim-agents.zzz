@@ -150,6 +150,8 @@ def validate_compatibility(repository: Path, broker: Path | None = None) -> dict
         f"claude-agent-sdk=={providers.get('claude_agent_sdk')}" not in dependencies
     ):
         raise ReleaseError("Python project does not pin the compatible Claude Agent SDK")
+    if f"openai-codex=={providers.get('openai_codex')}" not in dependencies:
+        raise ReleaseError("Python project does not pin the compatible Codex workflow SDK")
 
     pins = parse_pins(repository / "tests/ux-pins.env")
     expected_pins = {

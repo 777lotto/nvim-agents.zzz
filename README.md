@@ -171,14 +171,14 @@ active matching runtime without network access, or downloads and atomically
 activates the signed release when it is missing. It invokes no Cargo, uv, pip,
 or dependency resolver on the destination machine.
 
-After v0.1.0 is published, a manual production install can download the archive
+After v0.2.0 is published, a manual production install can download the archive
 and `SHA256SUMS` from the signed GitHub release and optionally require keyless
 attestation verification from a GitHub-authenticated control plane:
 
 ```sh
 gh attestation verify \
-  agent-manager-v0.1.0-x86_64-unknown-linux-gnu.tar.gz \
-  --repo 777lotto/agent-manager.nvimz
+  agent-manager-v0.2.0-x86_64-unknown-linux-gnu.tar.gz \
+  --repo 777lotto/nvim-agents.zzz
 ```
 
 The resumable [M5 release installation](ops/m5-release-install/README.md)

@@ -255,7 +255,7 @@ function Client:_begin_initialize()
       client = {
         name = "agent-manager.nvim",
         title = "Agent Manager",
-        version = "0.1.0",
+        version = "0.2.0",
       },
       last_sequence = last_sequence,
     },

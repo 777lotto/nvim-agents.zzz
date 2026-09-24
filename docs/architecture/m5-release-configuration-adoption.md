@@ -1,7 +1,7 @@
 # M5 release and configuration adoption
 
-Status: implementation accepted on 2026-09-02; signed v0.1.0 publication
-pending.
+Status: v0.1.0 published on 2026-09-04; v0.2.0 workflow-runtime release
+prepared on 2026-09-24, publication pending.
 
 M5 turns the M0-M4 runtime into one auditable production unit. It does not
 change the public broker or private worker protocols. Instead, it freezes their
@@ -12,21 +12,22 @@ and couples the released runtime to the exact Lazy pin in `nvim-config`.
 ## Compatibility lock
 
 `release/compatibility-v1.json` is the machine-checked release contract for
-v0.1.0:
+v0.2.0:
 
-| Boundary                         | Exact revision or version                  |
-| -------------------------------- | ------------------------------------------ |
-| Target                           | `x86_64-unknown-linux-gnu`                 |
-| Rust                             | 1.98.0                                     |
-| Python                           | 3.13.15                                    |
-| uv                               | 0.12.7                                     |
-| Neovim                           | 0.12.4                                     |
-| Broker version/revision / worker | 1 / 1 / 1                                  |
-| Codex App Server                 | 0.152.0                                    |
-| Claude Agent SDK / Claude Code   | 0.2.152 / 2.1.259                          |
-| UX Foundation                    | `7b8700db546b35e7b6a40b9a41b129354981587f` |
-| UX Styling                       | `3379b8ba03380316a5a8f3ad3671509e9283b518` |
-| UX Chrome                        | `a6a20a2135603484cd451ba7f338cf0b6fa7dbad` |
+| Boundary                            | Exact revision or version                  |
+| ----------------------------------- | ------------------------------------------ |
+| Target                              | `x86_64-unknown-linux-gnu`                 |
+| Rust                                | 1.98.0                                     |
+| Python                              | 3.13.15                                    |
+| uv                                  | 0.12.7                                     |
+| Neovim                              | 0.12.4                                     |
+| Broker version/revision / worker    | 1 / 1 / 1                                  |
+| Codex App Server                    | 0.152.0                                    |
+| Codex workflow SDK (`openai-codex`) | 0.155.1                                    |
+| Claude Agent SDK / Claude Code      | 0.2.152 / 2.1.259                          |
+| UX Foundation                       | `7b8700db546b35e7b6a40b9a41b129354981587f` |
+| UX Styling                          | `3379b8ba03380316a5a8f3ad3671509e9283b518` |
+| UX Chrome                           | `a6a20a2135603484cd451ba7f338cf0b6fa7dbad` |
 
 The release metadata validator compares that file with Cargo, Python, Mise,
 the promoted UX pins, and the compiled broker's `contract-info` response. A
@@ -36,7 +37,7 @@ version change cannot silently drift one side of the runtime boundary.
 
 `mise run release` produces:
 
-- `agent-manager-v0.1.0-x86_64-unknown-linux-gnu.tar.gz`; and
+- `agent-manager-v0.2.0-x86_64-unknown-linux-gnu.tar.gz`; and
 - `SHA256SUMS` for the archive.
 
 The archive contains the native broker, the exact relocatable Python
@@ -48,6 +49,16 @@ source paths are remapped, the ELF build ID is omitted, wheel installation is
 copy-only, and tar ownership, modes, order, and timestamps are normalized to
 the source commit. Two independent builds must compare byte-for-byte before
 handoff.
+
+The v0.2.0 Python payload includes `agent_manager_workflows` for queue execution
+and observation, alongside the standalone Claude worker. Its Codex workflow SDK
+pin is separate from the broker's Codex App Server baseline. The queue continues
+to own scheduling, leases and attempts. Installation verifies the workflow CLI
+entrypoint without opening a provider session and records its SDK version in
+the M5 status receipt.
+Workflow callers use Python's `-B` flag so reading or running a workflow does
+not populate the immutable runtime with bytecode that would invalidate M5
+verification. The Neovim observer sets it; the external queue must do the same.
 
 `release.json` records the full source revision, clean/dirty marker, source
 epoch, compatibility lock, broker contract, and payload-checksum digest.
@@ -81,7 +92,7 @@ publication because events created with GitHub Actions' repository token do not
 start another workflow. Release-event and manual-dispatch triggers remain as
 recovery paths for releases published outside the standard workflow.
 
-The v0.1.0 binary remains a repository release asset. A separate package or
+The v0.2.0 binary remains a repository release asset. A separate package or
 registry would add another trust and version boundary without solving a first
 release requirement.
 
@@ -108,6 +119,11 @@ proved it created; unknown, changed, or pre-existing state is preserved.
 After M5 activation, the existing M4 unit phase starts the durable service.
 Upgrades deliberately require an operator to stop live agents before changing
 the stable links.
+
+For the v0.1.0 to v0.2.0 upgrade, use the
+[publication and queue adoption runbook](../../ops/m5-release-install/README.md#publish-and-adopt-v020).
+Never replace the existing v0.1.0 artifact or point the stable runtime at a
+development virtual environment.
 
 ## Configuration adoption
 

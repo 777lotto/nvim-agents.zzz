@@ -1,7 +1,7 @@
 local M = {
   contract_version = 1,
   plugin_id = "agent.manager",
-  version = "0.1.0",
+  version = "0.2.0",
 }
 
 local function copy(value, seen)
