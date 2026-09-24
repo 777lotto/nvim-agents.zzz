@@ -341,6 +341,22 @@ local function home_directory(path)
 end
 
 local function set_window_options(window, wrap, pane)
+  vim.w[window].agent_manager = { plugin_id = "agent.manager", pane = pane }
+  local loaded, chrome = pcall(require, "ux_chrome.panes")
+  if loaded then
+    local navigation = pane == "agents" or pane == "workflow_checklist"
+    local role = navigation and "navigation" or pane == "prompt" and "input"
+      or (pane == "decision" or pane == "workflow_detail") and "context" or "log"
+    local buffer = vim.api.nvim_win_get_buf(window)
+    local content = navigation and "list"
+      or pane == "conversation" and vim.b[buffer].agent_manager_markdown ~= false and "markdown"
+      or "plaintext"
+    local ok, err = pcall(chrome.attach, {
+      id = "agent.manager." .. pane, role = role, content = content, window = window, buffer = buffer,
+    })
+    if ok then return true end
+    vim.notify("Agent Manager Chrome pane: " .. tostring(err), vim.log.levels.WARN)
+  end
   vim.wo[window].number = false
   vim.wo[window].relativenumber = false
   vim.wo[window].signcolumn = "no"
@@ -350,10 +366,11 @@ local function set_window_options(window, wrap, pane)
   vim.wo[window].linebreak = wrap
   vim.wo[window].breakindent = wrap
   vim.wo[window].cursorline = true
-  vim.w[window].agent_manager = {
-    plugin_id = "agent.manager",
-    pane = pane,
-  }
+  return false
+end
+
+function View:style_pane(window, pane, wrap)
+  return set_window_options(window, wrap, pane)
 end
 
 function View.layout_for(columns)
@@ -517,6 +534,7 @@ end
 
 function View:_attach_conversation_markdown(buffer)
   self.markdown = { enabled = self.opts.conversation_markdown ~= false, active = false }
+  vim.b[buffer].agent_manager_markdown = self.markdown.enabled
   if not self.markdown.enabled then
     return false
   end
@@ -812,8 +830,7 @@ function View:_build_layout(initial_pane)
   local prompt = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(prompt, self:_buffer("prompt"))
   vim.wo[prompt].winfixheight = true
-  set_window_options(prompt, true, "prompt")
-  vim.wo[prompt].cursorline = false
+  if not set_window_options(prompt, true, "prompt") then vim.wo[prompt].cursorline = false end
   self.windows.prompt = prompt
   self:_resize_prompt()
 
@@ -945,8 +962,7 @@ function View:focus_prompt()
     vim.api.nvim_set_current_tabpage(self.tab)
   end
   vim.api.nvim_win_set_buf(prompt, self:_buffer("prompt"))
-  set_window_options(prompt, true, "prompt")
-  vim.wo[prompt].cursorline = false
+  if not set_window_options(prompt, true, "prompt") then vim.wo[prompt].cursorline = false end
   vim.api.nvim_set_current_win(prompt)
   local lines = vim.api.nvim_buf_get_lines(self.buffers.prompt, 0, -1, false)
   local last_line = math.max(1, #lines)

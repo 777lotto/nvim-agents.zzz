@@ -61,14 +61,18 @@ function Workflows:layout()
   vim.cmd(vim.o.columns >= 100 and "botright vertical split" or "belowright split")
   self.windows.detail = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(self.windows.detail, self:_buffer("detail"))
-  for _, window in pairs(self.windows) do
-    vim.wo[window].wrap = true
-    vim.wo[window].linebreak = true
-    vim.wo[window].number = false
-    vim.wo[window].relativenumber = false
+  for name, window in pairs(self.windows) do
+    if view.style_pane then
+      view:style_pane(window, "workflow_" .. name, true)
+    else
+      vim.wo[window].wrap = true
+      vim.wo[window].linebreak = true
+      vim.wo[window].number = false
+      vim.wo[window].relativenumber = false
+      vim.wo[window].cursorline = true
+    end
     vim.wo[window].winfixheight = false
     vim.wo[window].winfixwidth = false
-    vim.wo[window].cursorline = true
   end
   view.windows = {}
   vim.api.nvim_set_current_win(self.windows.checklist)
