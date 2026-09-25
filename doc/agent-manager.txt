@@ -95,6 +95,10 @@ view disconnects Neovim only; it never shuts down the supervised broker.
                           Workflows and milestone phases start collapsed.
                           Each phase shows completed/total tasks. Expand a task
                           to browse its sessions; select a session for history.
+                          The detail header shows that session's model/provider
+                          and input/output tokens, including cached input.
+                          Usage is not reported until saved by the queue;
+                          cached input is already included in input tokens.
                           Enter toggles workflow/phase or inspects task/session.
                           l expands; h collapses or moves to the parent.
                           Tab switches panes, gr refreshes, q closes the view.

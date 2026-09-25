@@ -12,6 +12,24 @@ local function valid(window)
   return window and vim.api.nvim_win_is_valid(window)
 end
 
+local function session_metadata(attempt, lines)
+  local model = inline(attempt.model)
+  local provider = inline(attempt.provider)
+  table.insert(lines, " Model: " .. (model ~= "" and model or "not recorded")
+    .. (provider ~= "" and " · " .. provider or ""))
+  local usage = type(attempt.usage) == "table" and attempt.usage or {}
+  local function count(key)
+    local value = usage[key]
+    if type(value) == "number" and value >= 0 and value < math.huge and value % 1 == 0 then
+      return string.format("%.0f", value)
+    end
+    return "not reported"
+  end
+  table.insert(lines, " Tokens (session): " .. count("input_tokens") .. " input · "
+    .. count("output_tokens") .. " output")
+  table.insert(lines, " Cached input: " .. count("cached_input_tokens") .. " (included in input)")
+end
+
 function Workflows.new(view, opts, sessions)
   return setmetatable({
     view = view, opts = opts, sessions = sessions,
@@ -309,6 +327,7 @@ function Workflows:render()
   local row = self.selected
   if row then
     table.insert(detail, " " .. row.task.id .. " · " .. row.task.status)
+    if row.attempt then session_metadata(row.attempt, detail) end
     table.insert(detail, " " .. inline(row.task.summary or row.task.goal))
     if row.task.heartbeat and row.task.heartbeat.at then
       table.insert(detail, " " .. inline(row.task.heartbeat.phase) .. " · heartbeat "

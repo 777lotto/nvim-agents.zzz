@@ -63,6 +63,9 @@ refreshes. Selecting a task follows its latest session; selecting a session pins
 that attempt. Task state polls every two seconds; selected running history
 refreshes at most every five seconds. Completed tasks retain evidence and session
 links. Missing PR/session metadata is omitted or shown as unavailable.
+The detail pane starts with the selected session's model/provider and recorded
+input, output, and cached-input tokens. Cached input is included in input tokens;
+missing usage is shown as not reported until the queue saves it.
 
 See [authoring a workflow checklist](docs/workflows.md) for artifact placement,
 phase definitions, a manifest example, and the existing Rust plan sources.
