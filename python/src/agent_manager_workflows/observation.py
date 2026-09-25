@@ -140,6 +140,8 @@ def inspect_program(root: Path, repository: str, program: str) -> dict[str, Any]
         "repository": repository,
         "program": program,
         "control": read_object(directory / "control.json"),
+        "provider_switch_available": bool(manifest.get("failover")),
+        "provider_control": read_object(directory / "provider-control.json"),
         "tasks": tasks,
     }
 

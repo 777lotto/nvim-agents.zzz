@@ -96,7 +96,10 @@ transcript persistence inside their read-only sandbox; their results remain visi
 
 See [the workflow contract](protocol/workflow/v1/README.md) for the execution and
 observation boundary. Queue pause/resume/retry remain explicit external launcher
-actions; this first checklist is read-only, with no second queue controller.
+actions. `gp` requests the opposite provider suite for the selected workflow,
+after its active sessions finish; another `gp` cancels a pending request. A
+session limit cancels the pending request and leaves normal fallback in charge.
+The installed queue owns this control action; see [workflow controls](docs/workflows.md).
 
 ## Install and verify
 

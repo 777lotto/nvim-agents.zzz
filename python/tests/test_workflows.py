@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import tempfile
 import unittest
 from collections.abc import AsyncIterator
@@ -16,7 +17,7 @@ from claude_agent_sdk import RateLimitEvent, RateLimitInfo, ResultMessage, Syste
 from openai_codex.generated.v2_all import RateLimitSnapshot
 from pydantic import RootModel
 
-from agent_manager_workflows import execution, observation
+from agent_manager_workflows import control, execution, observation
 
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
@@ -80,6 +81,57 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 before, {path: path.read_bytes() for path in self.root.rglob("*.json")}
             )
+
+    def test_manual_provider_control_is_forwarded_to_exact_queue(self) -> None:
+        manifest = json.loads((self.program / "manifest.json").read_text())
+        manifest["failover"] = {"models": {"implement": "gpt-6-sol"}}
+        self.write(self.program / "manifest.json", manifest)
+        state = {"pending_provider": "codex", "last_event": "requested"}
+        self.write(self.program / "provider-control.json", state)
+        snapshot = observation.inspect_program(self.root, "demo", "refactor")
+        self.assertTrue(snapshot["provider_switch_available"])
+        self.assertEqual(snapshot["provider_control"], state)
+        response = {"version": 1, "provider_control": state}
+        with patch.object(
+            control.subprocess,
+            "run",
+            return_value=SimpleNamespace(stdout=json.dumps(response).encode()),
+        ) as run:
+            self.assertEqual(control.toggle_provider(self.root, "demo", "refactor"), response)
+        self.assertEqual(
+            run.call_args.args[0],
+            [
+                "zemrip-agent-workspace",
+                "queue-provider",
+                "demo",
+                "refactor",
+                "--root",
+                str(self.root),
+            ],
+        )
+        self.assertTrue(run.call_args.kwargs["check"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 10)
+        for raw in (b"no json", b"{}", b"x" * 65537):
+            with (
+                patch.object(control.subprocess, "run", return_value=SimpleNamespace(stdout=raw)),
+                self.assertRaises(ValueError),
+            ):
+                control.toggle_provider(self.root, "demo", "refactor")
+        with (
+            patch.object(
+                control.subprocess, "run", side_effect=subprocess.CalledProcessError(4, [])
+            ),
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            control.toggle_provider(self.root, "demo", "refactor")
+
+    def test_manual_provider_control_rejects_unsupported_and_invalid_programs(self) -> None:
+        with patch.object(control.subprocess, "run") as run:
+            with self.assertRaises(ValueError):
+                control.toggle_provider(self.root, "demo", "refactor")
+            with self.assertRaises(ValueError):
+                control.toggle_provider(self.root, "../demo", "refactor")
+            run.assert_not_called()
 
     def test_symlinks_and_path_traversal_are_rejected(self) -> None:
         with self.assertRaises(ValueError):
