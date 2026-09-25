@@ -11,7 +11,7 @@ requires-python = ">=3.13,<3.14"
 license = "MIT"
 authors = [{ name = "zemrip-ai" }]
 dependencies = [
-    "claude-agent-sdk==0.2.157",
+    "claude-agent-sdk==0.2.158",
     "openai-codex==0.155.1",
 ]
 

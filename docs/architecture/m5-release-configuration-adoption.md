@@ -1,7 +1,7 @@
 # M5 release and configuration adoption
 
-Status: v0.1.0 published on 2026-09-04; v0.2.0 workflow-runtime release
-prepared on 2026-09-24, publication pending.
+Status: v0.2.1 published on 2026-09-25; local queue runtime override added
+on 2026-09-25 for Opus compatibility.
 
 M5 turns the M0-M4 runtime into one auditable production unit. It does not
 change the public broker or private worker protocols. Instead, it freezes their
@@ -12,7 +12,7 @@ and couples the released runtime to the exact Lazy pin in `nvim-config`.
 ## Compatibility lock
 
 `release/compatibility-v1.json` is the machine-checked release contract for
-v0.2.0:
+the current source revision (published artifacts retain their original pins):
 
 | Boundary                            | Exact revision or version                  |
 | ----------------------------------- | ------------------------------------------ |
@@ -24,7 +24,7 @@ v0.2.0:
 | Broker version/revision / worker    | 1 / 1 / 1                                  |
 | Codex App Server                    | 0.152.0                                    |
 | Codex workflow SDK (`openai-codex`) | 0.155.1                                    |
-| Claude Agent SDK / Claude Code      | 0.2.157 / 2.1.277                          |
+| Claude Agent SDK / Claude Code      | 0.2.158 / 2.1.280                          |
 | UX Foundation                       | `7b8700db546b35e7b6a40b9a41b129354981587f` |
 | UX Styling                          | `3379b8ba03380316a5a8f3ad3671509e9283b518` |
 | UX Chrome                           | `a6a20a2135603484cd451ba7f338cf0b6fa7dbad` |
@@ -154,3 +154,19 @@ dependencies.
 - shell, Python, unit, and systemd phase validation;
 - Linux and macOS pinned-provider/runtime CI; and
 - production-source, signed-tag, attestation, and release workflow policy.
+
+## Opus 5.5 runtime compatibility
+
+The updated source pins Claude Agent SDK 0.2.158, whose bundled Claude Code
+2.1.280 meets the API minimum for `claude-opus-5-5`. The previous 0.2.1
+release bundled 2.1.277: Sonnet sessions could run, but escalation to Opus
+failed before any model tokens were generated. The queue recorded only a
+worker failure and eventually exhausted its runnable dependency roots.
+
+Use the source-pinned local override in `ops/queue-runtime/README.md` when
+queue recovery should not wait for a signed release. It installs into its own
+root and selects only the queue workflow interpreter; the published runtime
+and interactive broker stay intact. Replacing the system `claude` executable
+has no effect on the SDK's bundled executable. Retry exact blocked task IDs
+through the queue launcher after verification: a runtime update alone does
+not change durable blocked status.

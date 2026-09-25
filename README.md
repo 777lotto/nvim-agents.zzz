@@ -77,7 +77,7 @@ External queue   -> Python SDK worker -> Codex SDK or Claude Agent SDK
 
 The existing `zemrip-agent` queue owns admission, task worktrees, budgets,
 verification, independent review, recovery and PR integration. The Python runtime
-adds official `openai-codex==0.155.1` and `claude-agent-sdk==0.2.157` execution;
+adds official `openai-codex==0.155.1` and `claude-agent-sdk==0.2.158` execution;
 it does not duplicate that scheduler. The Rust broker remains responsible for
 standalone interactive sessions. Closing Neovim affects neither queue ownership
 nor queue execution. Inspecting a workflow never resumes, interrupts or writes
