@@ -931,6 +931,7 @@ function View:focus(pane)
     vim.api.nvim_win_set_buf(window, self:_buffer(pane))
     set_window_options(window, pane ~= "agents", pane)
     vim.api.nvim_set_current_win(window)
+    if pane == "agents" then self:_present_agents() end
     return true
   end
   local content = self.windows.conversation
@@ -942,6 +943,7 @@ function View:focus(pane)
     self.windows.conversation = content
     vim.api.nvim_set_current_win(content)
     set_window_options(content, pane ~= "agents", pane)
+    if pane == "agents" then self:_present_agents() end
     return true
   end
   return false
@@ -1309,6 +1311,71 @@ function View:_set_lines(name, lines, highlights)
   end
 end
 
+-- Reapply presentation to cached rows without traversing directories or
+-- refreshing the broker. Action maps remain owned by _render_agents.
+function View:_present_agents()
+  local content = self.navigation_content
+  if not content then
+    return
+  end
+  local loaded, components = pcall(require, "ux_chrome.components")
+  if not loaded then
+    return self:_set_lines("agents", content.lines, content.highlights)
+  end
+  local win
+  if valid_tab(self.tab) then
+    for _, candidate in ipairs(vim.api.nvim_tabpage_list_wins(self.tab)) do
+      if vim.api.nvim_win_get_buf(candidate) == self.buffers.agents then
+        win = candidate
+        break
+      end
+    end
+  end
+  local context = components.context({
+    id = "agent.manager.navigation",
+    window = win,
+    redraw = function() self:_present_agents() end,
+  })
+  local lines, highlights = {}, vim.deepcopy(content.highlights)
+  local titles, shifts, retained = {}, {}, {}
+  for _, highlight in ipairs(highlights) do
+    if highlight.group == "AgentManagerTitle" and not highlight.start then
+      titles[highlight.line] = true
+      highlight.group = "UXChromeComponentHeader"
+    end
+  end
+  for index, line in ipairs(content.lines) do
+    if line == "" then
+      lines[index], shifts[index], retained[index] = "", 0, 0
+    else
+      -- Tree connectors encode application hierarchy; keep them as content.
+      local stripped, removed = line:gsub("^ ", "", 1)
+      local text = context:format({
+        text = stripped,
+        depth = 0,
+        kind = titles[index] and "header" or "row",
+      })
+      lines[index], shifts[index], retained[index] = text, context.values.padding - removed, #text
+      -- The ellipsis replaces source text. Never move an original byte span
+      -- into that multibyte suffix (or beyond the clipped source boundary).
+      local full = string.rep(" ", context.values.padding) .. stripped:gsub("%c", " ")
+      if context.values.truncation == "ellipsis" and text ~= full then
+        retained[index] = math.max(0, #text - #"…")
+      end
+    end
+  end
+  for _, highlight in ipairs(highlights) do
+    local width, shift = retained[highlight.line], shifts[highlight.line]
+    if highlight.start then
+      highlight.start = math.min(width, math.max(0, highlight.start + shift))
+    end
+    if highlight.finish and highlight.finish >= 0 then
+      highlight.finish = math.min(width, math.max(highlight.start or 0, highlight.finish + shift))
+    end
+  end
+  self:_set_lines("agents", lines, highlights)
+end
+
 function View:_render_agents()
   local sessions = self.model:session_list()
   local provider_legend = " key · ● Codex · ◆ Claude"
@@ -1629,7 +1696,8 @@ function View:_render_agents()
       end
     end
   end
-  self:_set_lines("agents", lines, highlights)
+  self.navigation_content = { lines = lines, highlights = highlights }
+  self:_present_agents()
 end
 
 function View:_render_conversation()

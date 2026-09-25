@@ -16,6 +16,9 @@ and releases use Semantic Versioning.
   refused) instead of whichever CPython is first on `PATH`.
 ### Added
 
+- Optional Chrome navigation components share directory/session padding,
+  header colors, and display-cell truncation. Live Foundation edits reformat
+  cached rows while retaining action targets and provider/status highlights.
 - The Conversation transcript is parsed as Markdown: its filetype is registered
   with the bundled `markdown` treesitter parser, model labels are `##`
   headings followed by a blank line, and render-markdown.nvim can draw the

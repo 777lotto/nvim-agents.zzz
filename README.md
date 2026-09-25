@@ -542,3 +542,13 @@ roles. Foundation/Styling can edit role defaults or individual pane overrides
 without changing Agent Manager's content or actions. The conversation declares
 Markdown content unless `ui.conversation_markdown` is disabled. Older Chrome
 versions and installations without Chrome retain the native presentation.
+
+### Shared navigation components
+
+When Chrome provides `ux_chrome.components`, the directory/session tree uses
+shared navigation padding, header colors, and display-cell truncation. Tree
+connectors and hierarchy remain application content. Foundation settings live
+under `ux.chrome.components`, with overrides under
+`ux.chrome.component.agent.manager.navigation`. Live edits reformat cached rows
+and retain action maps, cursor position, and provider/status highlight spans.
+Older Chrome versions and standalone installations keep native presentation.
