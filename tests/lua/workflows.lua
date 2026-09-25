@@ -16,10 +16,12 @@ return function()
       { id = "done", milestone = "R0", goal = "Completed work\nDetailed instructions", status = "merged",
         evidence = { "tests passed" }, pr_number = 42, summary = vim.NIL,
         attempts = { { id = "session-001-implement", session_id = vim.NIL, provider = vim.NIL,
-          summary = vim.NIL, outcome = vim.NIL } } },
+          model = vim.NIL, usage = vim.NIL, summary = vim.NIL, outcome = vim.NIL } } },
       { id = "active", milestone = "R1", goal = "Running work", status = "running", pr_number = vim.NIL,
         summary = vim.NIL, heartbeat = { at = vim.NIL, phase = vim.NIL }, attempts = {
-          { id = "session-001-implement", session_id = "live-session", provider = "claude" },
+          { id = "session-001-implement", session_id = "live-session", provider = "claude",
+            model = "claude-sonnet-5", usage = { input_tokens = 1200, output_tokens = 0,
+              cached_input_tokens = 900 } },
         } },
       { id = "next", milestone = "R0", goal = "Upcoming work", status = "pending", attempts = {} },
       { id = "ungrouped", milestone = vim.NIL, goal = "Ungrouped work", status = "blocked", attempts = {} },
@@ -79,25 +81,43 @@ return function()
     assert(text("detail"):find("PR #42", 1, true))
     assert(text("detail"):find("Completed work", 1, true))
     assert(not text("detail"):find("vim.NIL", 1, true))
+    assert(text("detail"):find("Model: not recorded", 1, true))
+    assert(text("detail"):find("Tokens (session): not reported input · not reported output", 1, true))
     select("task", "next")
     assert(text():find("No sessions yet", 1, true))
     assert(not text("detail"):find("Live session output", 1, true))
+    assert(not text("detail"):find("Tokens (session):", 1, true))
     select("phase", "demo/refactor/phase/R1")
     assert(not text():find("live-session", 1, true))
     select("task", "active")
     assert(text("detail"):find("Live session output", 1, true))
     assert(not text("detail"):find("PR #", 1, true))
     assert(not text():find("vim.NIL", 1, true))
+    local header = vim.api.nvim_buf_get_lines(workflows.buffers.detail, 0, 6, false)
+    assert(header[4] == " Model: claude-sonnet-5 · claude")
+    assert(header[5] == " Tokens (session): 1200 input · 0 output")
+    assert(header[6] == " Cached input: 900 (included in input)")
+    snapshot.programs[1].tasks[2].attempts[1].usage.output_tokens = 250
+    workflows:refresh()
+    settle()
+    assert(text("detail"):find("1200 input · 250 output", 1, true))
     -- Tasks follow the next attempt; explicitly selected sessions remain pinned.
     local task = snapshot.programs[1].tasks[2]
-    table.insert(task.attempts, { id = "session-002-review", session_id = "review-session", provider = "codex" })
+    table.insert(task.attempts, { id = "session-002-review", session_id = "review-session", provider = "codex",
+      model = "gpt-5.6-sol\nreview", usage = { input_tokens = 100, output_tokens = -1,
+        cached_input_tokens = "unknown" } })
     workflows:refresh()
     settle()
     assert(workflows.selected.attempt.session_id == "review-session")
+    assert(text("detail"):find("Model: gpt-5.6-sol review · codex", 1, true))
+    assert(text("detail"):find("100 input · not reported output", 1, true))
+    assert(text("detail"):find("Cached input: not reported", 1, true))
     select("session", "demo/refactor/task/active/session/session-001-implement")
     workflows:refresh()
     settle()
     assert(workflows.selected.attempt.session_id == "live-session")
+    assert(text("detail"):find("Model: claude-sonnet-5 · claude", 1, true))
+    assert(text("detail"):find("1200 input · 250 output", 1, true))
     -- h moves from session to task, then collapses, then moves to its phase.
     workflows:collapse()
     assert(workflows.rows[vim.api.nvim_win_get_cursor(0)[1]].kind == "task")
