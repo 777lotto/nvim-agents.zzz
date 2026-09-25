@@ -93,6 +93,29 @@ private renderers. Lualine or a future public Chrome segment can consume the
 same cache. Coexistence acceptance snapshots every Chrome-owned native option
 before startup, during a live fake-provider approval, and after exact teardown.
 
+## Optional Chrome navigation components
+
+When the installed Chrome revision exposes `ux_chrome.components`, the directory
+and session tree uses the stable `agent.manager.navigation` component identity.
+Chrome registers shared navigation preferences and per-component overrides with
+Foundation; Agent Manager does not extend the frozen Foundation schema or write
+Chrome's highlight definitions. Header rows use Chrome's shared header group,
+while provider and status spans retain their semantic Agent Manager groups.
+
+The view caches its source lines and highlights after rebuilding domain rows.
+Live presentation edits apply shared padding and display-cell truncation to
+that cache, adjust byte spans, and leave row-to-action maps untouched. Tree
+connectors retain application-defined indentation. The callback performs no
+broker refresh or filesystem scan. Narrow layouts reattach the callback when
+their shared content window returns to navigation; hidden panes acquire current
+preferences on display. Missing component support preserves native rendering.
+
+`m3_chrome.lua` exercises this optional contract when available, including
+preview/revert, per-component overrides, preserved selection, Unicode span
+clipping, and narrow-window refocus. The existing minimum compatibility pins
+remain supported; the component integration also requires validation against a
+Chrome checkout providing the new API.
+
 ## Panels decision
 
 No `ux.panels` package is available at the promoted M3 baseline. The existing

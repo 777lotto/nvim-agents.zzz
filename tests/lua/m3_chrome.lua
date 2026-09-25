@@ -26,6 +26,7 @@ local function surface_options()
 end
 
 h.finish(function()
+  vim.o.columns = 160
   foundation._reset_for_tests()
   chrome._reset_for_tests()
   foundation.setup({
@@ -139,6 +140,77 @@ h.finish(function()
     h.truthy(tx:revert())
     h.truthy(tx:commit())
     h.equal(vim.wo[conversation].wrap, true, "shared wrap revert")
+  end
+
+  local components_ok = pcall(require, "ux_chrome.components")
+  if components_ok then
+    local win, buf = status.view.windows.agents, status.view.buffers.agents
+    local before = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    vim.api.nvim_win_set_cursor(win, { 1, 3 })
+    local cursor = vim.api.nvim_win_get_cursor(win)
+    local selected = manager.status().model.selected_agent_id
+    local View = require("agent_manager.view")
+    local original_render = View._render_agents
+    View._render_agents = function() error("presentation edit rebuilt domain rows") end
+    local tx = h.truthy(foundation.begin_transaction())
+    h.truthy(tx:stage("ux.chrome.components/navigation/padding/value", 4))
+    h.equal(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1], "    1 AGENTS · BY DIRECTORY")
+    h.equal(vim.api.nvim_win_get_cursor(win), cursor, "shared component edit moved selection")
+    h.equal(manager.status().model.selected_agent_id, selected, "shared component edit changed agent")
+    h.truthy(tx:stage("ux.chrome.component.agent.manager.navigation/navigation/padding/value", 2))
+    h.equal(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1], "  1 AGENTS · BY DIRECTORY")
+    h.truthy(tx:undo())
+    h.equal(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1], "    1 AGENTS · BY DIRECTORY")
+    h.truthy(tx:revert())
+    h.truthy(tx:commit())
+    View._render_agents = original_render
+    h.equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), before, "navigation revert")
+
+    -- A narrow layout reuses its conversation window for navigation. Verify
+    -- refocusing binds cached redraw again and clips semantic byte spans.
+    local fixture_buf = vim.api.nvim_create_buf(false, true)
+    local fixture_win = vim.api.nvim_open_win(fixture_buf, false, {
+      relative = "editor", row = 1, col = 1, width = 3, height = 2,
+    })
+    local target = { id = "full-session-identity" }
+    local fixture = setmetatable({
+      tab = vim.api.nvim_get_current_tabpage(),
+      buffers = { agents = fixture_buf },
+      windows = { conversation = fixture_win },
+      namespace = vim.api.nvim_create_namespace("AgentManagerComponentFixture"),
+      session_rows = { target },
+      navigation_content = {
+        lines = { " ●界 example" },
+        highlights = {
+          { line = 1, start = 1, finish = 4, group = "AgentManagerProviderCodex" },
+          { line = 1, start = 4, finish = 7, group = "AgentManagerStatusSuccess" },
+        },
+      },
+    }, { __index = View })
+    h.truthy(fixture:focus("agents"))
+    h.equal(vim.api.nvim_buf_get_lines(fixture_buf, 0, -1, false), { " ●…" })
+    local spans = vim.api.nvim_buf_get_extmarks(fixture_buf, fixture.namespace, 0, -1, { details = true })
+    local provider_span
+    for _, span in ipairs(spans) do
+      h.truthy(span[3] <= 4 and span[4].end_col <= 4, "span crossed into the ellipsis")
+      if span[4].hl_group == "AgentManagerProviderCodex" then provider_span = span end
+    end
+    h.truthy(provider_span, "truncation lost a visible provider highlight")
+    h.equal(provider_span[3], 1)
+    h.equal(provider_span[4].end_col, 4)
+    vim.api.nvim_win_set_buf(fixture_win, vim.api.nvim_create_buf(false, true))
+    tx = h.truthy(foundation.begin_transaction())
+    h.truthy(tx:stage("ux.chrome.components/navigation/padding/value", 4))
+    h.equal(vim.api.nvim_buf_get_lines(fixture_buf, 0, -1, false), { " ●…" }, "hidden callback leaked")
+    h.truthy(fixture:focus("agents"))
+    h.equal(vim.api.nvim_buf_get_lines(fixture_buf, 0, -1, false), { "  …" })
+    h.truthy(tx:stage("ux.chrome.components/navigation/padding/value", 0))
+    h.equal(vim.api.nvim_buf_get_lines(fixture_buf, 0, -1, false), { "●…" }, "refocus lost live edits")
+    h.truthy(fixture.session_rows[1] == target, "presentation replaced the action target")
+    h.truthy(tx:revert())
+    h.truthy(tx:commit())
+    vim.api.nvim_win_close(fixture_win, true)
+    vim.api.nvim_buf_delete(fixture_buf, { force = true })
   end
 
   local health = manager.health().ux

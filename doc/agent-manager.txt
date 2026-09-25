@@ -314,6 +314,15 @@ and Foundation owns the AgentManager* groups and profile replay. UX Styling
 discovers `ux_styling_adapter.agent_manager` without loading the Agent Manager
 runtime, starting the broker, or reading domain data.
 
+When Chrome provides ux_chrome.components, navigation rows use shared padding,
+header colors, and display-cell truncation. Foundation settings live under
+ux.chrome.components with overrides at
+ux.chrome.component.agent.manager.navigation. Live edits reformat cached rows
+without refreshing the broker or scanning directories. Tree connectors retain
+their application-defined indentation. Action targets retain full identities
+even when displayed text truncates. Older Chrome and standalone installations
+keep native presentation.
+
 Agent Manager does not write tabline, statusline, winbar, statuscolumn, fold,
 or scrollbar expressions owned by UX Chrome. Cached consumers may call:
 
