@@ -1,4 +1,4 @@
-"""Bounded stdout protocol shared by the queue and its read-only Neovim observer."""
+"""Bounded stdout protocol for queue execution, observation, and human control."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .control import toggle_provider
 from .execution import ExecutionRequest, SessionLimit, execute
 from .observation import default_root, history, inspect_all
 
@@ -34,7 +35,9 @@ async def run_request() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("run", "inspect", "history", "capabilities"))
+    parser.add_argument(
+        "action", choices=("run", "inspect", "history", "capabilities", "toggle-provider")
+    )
     parser.add_argument("--root", type=Path, default=default_root())
     parser.add_argument("--repository")
     parser.add_argument("--program")
@@ -55,6 +58,10 @@ def main() -> int:
             asyncio.run(run_request())
         elif args.action == "inspect":
             emit(inspect_all(args.root))
+        elif args.action == "toggle-provider":
+            if not args.repository or not args.program:
+                raise ValueError("provider toggle requires exact workflow")
+            emit(toggle_provider(args.root, args.repository, args.program))
         else:
             if not all((args.repository, args.program, args.task, args.attempt)):
                 raise ValueError("history requires exact workflow, task and attempt")

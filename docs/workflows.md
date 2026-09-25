@@ -98,3 +98,27 @@ task is active. It is not a terminal attachment or a token-by-token feed. Legacy
 attempts without saved identities and reviews without persisted transcripts
 still expose recorded results/evidence. Missing JSON values are absence of
 metadata; `vim.NIL` is Neovim's null sentinel and has no checklist meaning.
+
+## Switch provider suites
+
+Press `gp` on a workflow, phase, task, or session to request the opposite provider
+suite for that workflow. In the detail pane it targets the selected task's workflow.
+The queue must have a reviewed failover policy and an installed launcher supporting
+`queue-provider`; older launchers fail visibly without changing queue state.
+
+If a session is running, the header shows the pending provider. All running sessions
+finish unchanged, and new sessions wait for them before switching. Press `gp` again
+while pending to cancel. When idle, the preference changes immediately. The chosen
+provider remains preferred across stages, tasks, and restarts; each role uses its
+existing reviewed model/effort pair, including research, acceptance, and helpers.
+Provider cooldowns still take precedence over that preference.
+
+If an active session hits a confirmed session limit before the switch applies,
+the queue cancels the pending request and runs its normal fallback logic. The header
+reports the cancellation. Session history, usage, task evidence, and worktrees stay
+with their original attempts. Closing Neovim does not cancel an accepted request.
+
+Roll out the companion queue launcher while its old workers are idle before using
+this binding. Agent Manager forwards the request to that launcher; it does not
+write scheduler state or resume a provider session itself. A custom `workflows.root`
+must match the launcher's registered state root before any control action is accepted.

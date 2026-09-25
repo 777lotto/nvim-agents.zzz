@@ -102,6 +102,10 @@ view disconnects Neovim only; it never shuts down the supervised broker.
                           Enter toggles workflow/phase or inspects task/session.
                           l expands; h collapses or moves to the parent.
                           Tab switches panes, gr refreshes, q closes the view.
+                          gp toggles the workflow's provider suite after active
+                          sessions finish; gp again cancels a pending switch.
+                          A session limit cancels the pending manual switch
+                          and automatic fallback handles the interrupted stage.
                           Checked tasks retain completed work and sessions;
                           active tasks/sessions are highlighted when expanded.
                           This observer never resumes a session.

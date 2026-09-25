@@ -55,6 +55,7 @@ function Workflows:_buffer(name)
   map("gs", self.sessions, "Show standalone sessions")
   map("gw", function() self:open() end, "Show workflows")
   map("q", function() self.view:close() end, "Close Agent Manager")
+  map("gp", function() self:toggle_provider() end, "Toggle provider suite after active sessions finish")
   map("gr", function() self:refresh(true) end, "Refresh workflow and selected session")
   map("<CR>", function() self:select() end, "Toggle workflow/phase or inspect task/session")
   map("l", function() self:select(true) end, "Expand workflow, phase, or task")
@@ -122,7 +123,9 @@ function Workflows:request(action, arguments, callback)
       if self.closed then return end
       local decoded, value = pcall(vim.json.decode, result.stdout or "", { luanil = { object = true, array = true } })
       if result.code ~= 0 or not decoded or type(value) ~= "table" or value.version ~= 1 then
-        callback(nil, "Workflow observer unavailable; the queue process is unaffected")
+        callback(nil, action == "toggle-provider"
+          and "Provider switch failed; check the installed queue supports manual switching, then refresh"
+          or "Workflow observer unavailable; the queue process is unaffected")
       else
         callback(value)
       end
@@ -130,6 +133,36 @@ function Workflows:request(action, arguments, callback)
   end)
   if not ok then callback(nil, "Could not start workflow observer") end
   return ok and process or nil
+end
+
+function Workflows:toggle_provider()
+  if self.provider_pending then return end
+  local row
+  if vim.api.nvim_get_current_win() == self.windows.checklist then
+    row = self.rows[vim.api.nvim_win_get_cursor(0)[1]]
+  else
+    row = self.selected
+  end
+  local program = row and row.program
+  if not program then
+    vim.notify("Select a workflow, phase, task, or session first", vim.log.levels.INFO)
+    return
+  end
+  if not program.provider_switch_available then
+    vim.notify("This workflow has no provider failover policy", vim.log.levels.INFO)
+    return
+  end
+  self.provider_pending = true
+  self:request("toggle-provider", { "--repository", program.repository, "--program", program.program }, function(value, err)
+    self.provider_pending = false
+    if err then
+      vim.notify(err, vim.log.levels.ERROR)
+    else
+      program.provider_control = value.provider_control
+      self:render()
+      self:refresh()
+    end
+  end)
 end
 
 function Workflows:refresh(with_history)
@@ -244,7 +277,7 @@ function Workflows:render()
   if self.view.workspace_mode ~= "workflows" or not self.view.tab then return end
   local cursor = valid(self.windows.checklist) and vim.api.nvim_win_get_cursor(self.windows.checklist)
   local cursor_row = cursor and self.rows[cursor[1]]
-  local lines = { " WORKFLOWS   ·   gs Sessions", " Enter toggle/inspect · l/h expand/parent · gr refresh", "" }
+  local lines = { " WORKFLOWS   ·   gs Sessions", " Enter toggle/inspect · l/h expand/parent · gr refresh · gp provider suite", "" }
   local highlights = {}
   self.rows = {}
   local function add(text, row, highlight)
@@ -269,13 +302,23 @@ function Workflows:render()
       table.insert(phase.tasks, task)
       if completed[task.status] then count = count + 1; phase.count = phase.count + 1 end
     end
+    local provider_control = program.provider_control or {}
+    local provider_status = ""
+    if program.provider_switch_available then
+      provider_status = " · suite " .. inline(provider_control.preferred_provider or "automatic")
+      if provider_control.pending_provider then
+        provider_status = provider_status .. " → " .. inline(provider_control.pending_provider) .. " after sessions finish (gp cancel)"
+      elseif provider_control.last_event == "canceled-session-limit" then
+        provider_status = provider_status .. " · switch canceled: session limit"
+      end
+    end
     add(string.format(" %s %s / %s · %d/%d complete%s", marker(program_key), inline(program.repository),
-      inline(program.program), count, #program.tasks, program.control.paused == true and " · paused" or ""),
-      { key = program_key, kind = "program" })
+      inline(program.program), count, #program.tasks, (program.control.paused == true and " · paused" or "") .. provider_status),
+      { key = program_key, kind = "program", program = program })
     if self.expanded[program_key] then
       for _, phase in ipairs(phases) do
         add(string.format("   %s %s · %d/%d complete", marker(phase.key), phase.name, phase.count, #phase.tasks),
-          { key = phase.key, parent = program_key, kind = "phase" })
+          { key = phase.key, parent = program_key, kind = "phase", program = program })
         if self.expanded[phase.key] then
           for _, task in ipairs(phase.tasks) do
             local key = program_key .. "/task/" .. task.id

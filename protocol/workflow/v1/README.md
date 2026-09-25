@@ -2,8 +2,7 @@
 
 This private process contract is independent of broker JSON-RPC. The Rust broker
 still owns standalone sessions; the existing queue is the only scheduler and
-writer for workflow sessions. `python -I -m agent_manager_workflows` has three
-actions. There is no listener or shell interpolation.
+writer for workflow sessions. `python -I -m agent_manager_workflows` has the actions below. There is no listener or shell interpolation.
 
 - `run`: one JSON request on stdin followed by EOF; JSONL events on stdout.
   `ExecutionRequest` in `execution.py` validates version 1, provider, absolute
@@ -12,6 +11,7 @@ actions. There is no listener or shell interpolation.
   resume field is not used for automatic retry. Git/task evidence supplies continuity.
 - `inspect [--root ROOT]`: one version-1 JSON object with `programs` and `errors`.
   Each program has repository/program identity, control and ordered tasks.
+  Additive `provider_switch_available` and `provider_control` fields expose suite control.
   Each task carries status, goal, milestone, evidence, dependencies, heartbeat and
   attempts. Neovim groups tasks by `milestone` in first-occurrence order, preserving
   task order within each group. Missing/null/empty milestones use Other tasks.
@@ -25,6 +25,18 @@ actions. There is no listener or shell interpolation.
   uses `AsyncThread.read`, not `thread_resume` or a turn. No observer action
   submits model input. This is persisted history, not a terminal attachment or
   a token-by-token live stream; partial output appears when the provider saves it.
+
+- `toggle-provider --repository R --program P [--root ROOT]`: explicitly requested
+  human control. Validates the workflow identity and failover policy, then invokes
+  `zemrip-agent-workspace queue-provider R P --root ROOT` as an argv array with a
+  ten-second timeout. The queue checks ROOT against its registered queue root.
+  Returns `{version:1,provider_control:{...}}`; failures remain redacted and nonzero.
+  No provider input, resume, signal, or direct queue-state write occurs here.
+  `provider_control` exposes optional `preferred_provider`, `last_provider`,
+  `pending_provider` (`claude` or `codex`), and `last_event` (`requested`, `applied`,
+  `canceled`, or `canceled-session-limit`). A pending switch drains active sessions;
+  a repeated toggle cancels it, and a session-limit event cancels it before normal
+  fallback. Completed switches persist the preference while respecting cooldowns.
 
 Execution events: `session {provider,session_id}`, `progress {event,turn_id?}`,
 `usage {usage}`, `result {session_id,result,usage}`, or redacted

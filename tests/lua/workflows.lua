@@ -6,13 +6,15 @@ return function()
     namespace = vim.api.nvim_create_namespace("WorkflowTest"),
   }
   local session_switches = 0
+  local provider_switches = 0
   local workflows = Workflows.new(view, { python = "/fake/python", refresh_ms = 60000 }, function()
     session_switches = session_switches + 1
   end)
   local reads = {}
   -- Exercise the real JSON decode boundary, including Python's explicit nulls.
   local snapshot = { version = 1, programs = {
-    { repository = "demo", program = "refactor", control = { paused = vim.NIL }, tasks = {
+    { repository = "demo", program = "refactor", control = { paused = vim.NIL }, provider_switch_available = true,
+      provider_control = {}, tasks = {
       { id = "done", milestone = "R0", goal = "Completed work\nDetailed instructions", status = "merged",
         evidence = { "tests passed" }, pr_number = 42, summary = vim.NIL,
         attempts = { { id = "session-001-implement", session_id = vim.NIL, provider = vim.NIL,
@@ -33,6 +35,17 @@ return function()
     assert(argv[2] == "-B", "workflow reads must preserve the immutable runtime")
     local action = argv[6]
     table.insert(reads, { action = action, args = argv })
+    if action == "toggle-provider" then
+      provider_switches = provider_switches + 1
+      assert(argv[7] == "--repository" and argv[8] == "demo")
+      assert(argv[9] == "--program" and argv[10] == "refactor")
+      snapshot.programs[1].provider_control = provider_switches == 1
+        and { pending_provider = "codex", last_event = "requested" }
+        or { last_event = "canceled" }
+      callback({ code = 0, stdout = vim.json.encode({ version = 1,
+        provider_control = snapshot.programs[1].provider_control }) })
+      return {}
+    end
     callback({ code = 0, stdout = vim.json.encode(action == "inspect" and snapshot or {
       version = 1, messages = { { role = "assistant", text = "Live session output" } }, notice = vim.NIL,
     }) })
@@ -139,6 +152,26 @@ return function()
     select("program", "second/refactor")
     assert(text():find("No tasks yet", 1, true))
     for _, read in ipairs(reads) do assert(read.action == "inspect" or read.action == "history") end
+    -- The human binding targets the cursor's workflow, including phase rows.
+    focus("phase", "demo/refactor/phase/R0")
+    local binding = vim.fn.maparg("gp", "n", false, true)
+    assert(type(binding.callback) == "function")
+    binding.callback()
+    binding.callback() -- an in-flight command is not submitted twice
+    assert(vim.wait(1000, function() return not workflows.provider_pending end))
+    settle()
+    assert(provider_switches == 1)
+    assert(text():find("codex after sessions finish (gp cancel)", 1, true))
+    focus("program", "demo/refactor")
+    workflows:toggle_provider()
+    assert(vim.wait(1000, function() return not workflows.provider_pending end))
+    settle()
+    assert(provider_switches == 2)
+    assert(not text():find("gp cancel", 1, true))
+    snapshot.programs[1].provider_control = { last_event = "canceled-session-limit" }
+    workflows:refresh()
+    settle()
+    assert(text():find("switch canceled: session limit", 1, true))
     for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(workflows.buffers.checklist, "n")) do
       if mapping.lhs == "gs" then mapping.callback() end
       assert(mapping.lhs ~= "sn" and mapping.lhs ~= "tp")
