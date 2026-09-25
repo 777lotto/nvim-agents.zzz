@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage, SystemMessage
+from claude_agent_sdk import (
+    ClaudeAgentOptions,
+    ClaudeSDKClient,
+    RateLimitEvent,
+    ResultMessage,
+    SystemMessage,
+)
 from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
-from openai_codex.generated.v2_all import ReasoningEffort
+from openai_codex.errors import JsonRpcError
+from openai_codex.generated.v2_all import GetAccountRateLimitsResponse, ReasoningEffort
 from pydantic import BaseModel, ConfigDict, Field
 
 Emit = Callable[[dict[str, Any]], None]
@@ -29,6 +38,67 @@ class ExecutionRequest(BaseModel):
     stage: Literal["implement", "repair", "review"]
     output_schema: dict[str, Any]
     resume: str | None = None
+    allow_subagents: bool = False
+
+
+class SessionLimit(RuntimeError):
+    """Only allowlisted metadata crosses the worker's redaction boundary."""
+
+    def __init__(self, provider: Literal["codex", "claude"], resets_at: int):
+        super().__init__("Five-hour subscription window exhausted")
+        self.provider = provider
+        self.resets_at = resets_at
+
+    def frame(self) -> dict[str, Any]:
+        return {
+            "type": "error",
+            "code": "session_limit",
+            "message": "Five-hour subscription window exhausted",
+            "quota": {
+                "provider": self.provider,
+                "window_seconds": 18000,
+                "resets_at": self.resets_at,
+            },
+        }
+
+
+def valid_reset(value: Any) -> bool:
+    return type(value) is int and time.time() < value <= time.time() + 18060
+
+
+async def codex_session_limit(codex: AsyncCodex, error: Any) -> SessionLimit | None:
+    # A terminal typed error AND a fresh account snapshot are both required.
+    # Bare 429s, message text, weekly limits and unrelated buckets are insufficient.
+    if not isinstance(error, dict):
+        return None
+    if cast(dict[str, Any], error).get("codexErrorInfo") != "rateLimitExceeded":
+        return None
+    try:
+        # SDK 0.155.1 has no high-level rate-limits method. Use its typed
+        # transport on the same authenticated app-server, never a second login.
+        response = await codex._client.request(  # pyright: ignore[reportPrivateUsage]
+            "account/rateLimits/read", None, response_model=GetAccountRateLimitsResponse
+        )
+    except Exception:
+        return None
+    snapshot = response.rate_limits
+    if snapshot.limit_id not in {None, "codex"} or snapshot.spend_control_reached:
+        return None
+    exhausted: list[int] = []
+    for window in (snapshot.primary, snapshot.secondary):
+        if window is None or window.used_percent < 100:
+            continue
+        if window.window_duration_mins != 300 or not valid_reset(window.resets_at):
+            return None
+        assert window.resets_at is not None
+        exhausted.append(window.resets_at)
+    return SessionLimit("codex", max(exhausted)) if exhausted else None
+
+
+async def check_codex_limit(codex: AsyncCodex, error: Any) -> None:
+    limit = await codex_session_limit(codex, error)
+    if limit:
+        raise limit from None
 
 
 def token_count(value: Any) -> int:
@@ -51,7 +121,7 @@ async def run_codex(request: ExecutionRequest, emit: Emit) -> None:
     config = CodexConfig(
         cwd=request.cwd,
         experimental_api=False,
-        config_overrides=("agents.enabled=false",),
+        config_overrides=(f"agents.enabled={str(request.allow_subagents).lower()}",),
     )
     sandbox = Sandbox.read_only if request.stage == "review" else Sandbox.full_access
     async with AsyncCodex(config) as codex:
@@ -72,11 +142,15 @@ async def run_codex(request: ExecutionRequest, emit: Emit) -> None:
                 sandbox=sandbox,
             )
         emit({"type": "session", "provider": "codex", "session_id": thread.id})
-        turn = await thread.turn(
-            request.prompt,
-            effort=ReasoningEffort("xhigh" if request.effort == "max" else request.effort),
-            output_schema=request.output_schema,
-        )
+        try:
+            turn = await thread.turn(
+                request.prompt,
+                effort=ReasoningEffort("xhigh" if request.effort == "max" else request.effort),
+                output_schema=request.output_schema,
+            )
+        except JsonRpcError as error:
+            await check_codex_limit(codex, error.data)
+            raise
         response: str | None = None
         usage: dict[str, int] = {}
         completed = False
@@ -99,7 +173,11 @@ async def run_codex(request: ExecutionRequest, emit: Emit) -> None:
                     }
                     emit({"type": "usage", "usage": usage})
                 elif event.method == "turn/completed":
-                    completed = payload.get("turn", {}).get("status") == "completed"
+                    terminal = payload.get("turn", {})
+                    completed = terminal.get("status") == "completed"
+                    await check_codex_limit(
+                        codex, terminal.get("error") if terminal.get("status") == "failed" else None
+                    )
         except asyncio.CancelledError:
             await turn.interrupt()
             raise
@@ -120,7 +198,7 @@ async def run_claude(request: ExecutionRequest, emit: Emit) -> None:
         effort=request.effort,
         resume=request.resume,
         permission_mode="bypassPermissions",
-        disallowed_tools=["Agent", "Task"],
+        disallowed_tools=[] if request.allow_subagents else ["Agent", "Task"],
         output_format={"type": "json_schema", "schema": request.output_schema},
         include_partial_messages=True,
         extra_args={"no-session-persistence": None} if request.stage == "review" else {},
@@ -129,6 +207,17 @@ async def run_claude(request: ExecutionRequest, emit: Emit) -> None:
         await client.query(request.prompt)
         try:
             async for message in client.receive_response():
+                if isinstance(message, RateLimitEvent):
+                    info = message.rate_limit_info
+                    if (
+                        info.status == "rejected"
+                        and info.rate_limit_type == "five_hour"
+                        and valid_reset(info.resets_at)
+                    ):
+                        assert info.resets_at is not None
+                        with contextlib.suppress(Exception):
+                            await client.interrupt()
+                        raise SessionLimit("claude", info.resets_at)
                 if isinstance(message, SystemMessage) and message.subtype == "init":
                     emit(
                         {

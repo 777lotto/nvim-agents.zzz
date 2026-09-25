@@ -12,7 +12,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from claude_agent_sdk import ResultMessage, SystemMessage
+from claude_agent_sdk import RateLimitEvent, RateLimitInfo, ResultMessage, SystemMessage
+from openai_codex.generated.v2_all import RateLimitSnapshot
 from pydantic import RootModel
 
 from agent_manager_workflows import execution, observation
@@ -217,6 +218,168 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             await execution.execute(
                 self.request(stage="review", resume="implementation"), events.append
             )
+
+    async def test_claude_five_hour_rejection_is_sanitized(self) -> None:
+        async def stream() -> AsyncIterator[Any]:
+            yield RateLimitEvent(
+                rate_limit_info=RateLimitInfo(
+                    status="rejected",
+                    rate_limit_type="five_hour",
+                    resets_at=2000,
+                    raw={"private": "secret provider payload"},
+                ),
+                uuid="event",
+                session_id="session",
+            )
+
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.receive_response = stream
+        with (
+            patch.object(execution, "ClaudeSDKClient", return_value=client),
+            patch.object(execution.time, "time", return_value=1000),
+            self.assertRaises(execution.SessionLimit) as raised,
+        ):
+            await execution.execute(self.request("claude"), lambda event: None)
+        frame = raised.exception.frame()
+        self.assertEqual(
+            frame["quota"],
+            {
+                "provider": "claude",
+                "window_seconds": 18000,
+                "resets_at": 2000,
+            },
+        )
+        self.assertNotIn("secret", json.dumps(frame))
+        client.interrupt.assert_awaited_once()
+
+    async def test_claude_non_session_limits_do_not_switch(self) -> None:
+        cases: list[tuple[Any, Any, Any]] = [
+            ("seven_day", "rejected", 2000),
+            ("five_hour", "allowed_warning", 2000),
+            ("five_hour", "rejected", None),
+            ("five_hour", "rejected", 900),
+            ("five_hour", "rejected", True),
+        ]
+        for kind, status, reset in cases:
+
+            async def stream(
+                status: Any = status, kind: Any = kind, reset: Any = reset
+            ) -> AsyncIterator[Any]:
+                yield RateLimitEvent(
+                    rate_limit_info=RateLimitInfo(
+                        status=status,
+                        rate_limit_type=kind,
+                        resets_at=reset,
+                    ),
+                    uuid="event",
+                    session_id="session",
+                )
+
+            client = AsyncMock()
+            client.__aenter__.return_value = client
+            client.receive_response = stream
+            with (
+                self.subTest(kind=kind, status=status, reset=reset),
+                patch.object(execution, "ClaudeSDKClient", return_value=client),
+                patch.object(execution.time, "time", return_value=1000),
+                self.assertRaisesRegex(RuntimeError, "ended without a result"),
+            ):
+                await execution.execute(self.request("claude"), lambda event: None)
+            client.interrupt.assert_not_called()
+
+    async def test_codex_limit_requires_typed_error_and_exact_window(self) -> None:
+        snapshot = {
+            "limitId": "codex",
+            "primary": {
+                "usedPercent": 100,
+                "windowDurationMins": 300,
+                "resetsAt": 2000,
+            },
+        }
+        client = AsyncMock()
+        client._client.request.return_value = SimpleNamespace(
+            rate_limits=RateLimitSnapshot.model_validate(snapshot)
+        )
+        with patch.object(execution.time, "time", return_value=1000):
+            for error in ({"code": 429}, {"codexErrorInfo": "serverOverloaded"}, None):
+                self.assertIsNone(await execution.codex_session_limit(client, error))
+            client._client.request.assert_not_called()
+            limit = await execution.codex_session_limit(
+                client, {"codexErrorInfo": "rateLimitExceeded"}
+            )
+            self.assertIsInstance(limit, execution.SessionLimit)
+            for change in (
+                {"primary": {"usedPercent": 99, "windowDurationMins": 300, "resetsAt": 2000}},
+                {"primary": {"usedPercent": 100, "windowDurationMins": 10080, "resetsAt": 2000}},
+                {"primary": {"usedPercent": 100, "windowDurationMins": 300, "resetsAt": None}},
+                {"primary": {"usedPercent": 100, "windowDurationMins": 300, "resetsAt": 999}},
+                {"secondary": {"usedPercent": 100, "windowDurationMins": 10080, "resetsAt": 2000}},
+                {"limitId": "unrelated-model"},
+                {"spendControlReached": True},
+            ):
+                client._client.request.return_value = SimpleNamespace(
+                    rate_limits=RateLimitSnapshot.model_validate({**snapshot, **change})
+                )
+                with self.subTest(change=change):
+                    self.assertIsNone(
+                        await execution.codex_session_limit(
+                            client, {"codexErrorInfo": "rateLimitExceeded"}
+                        )
+                    )
+
+    async def test_codex_terminal_failure_uses_quota_contract(self) -> None:
+        async def stream() -> AsyncIterator[Any]:
+            yield SimpleNamespace(
+                method="turn/completed",
+                payload=RootModel[dict[str, Any]](
+                    {
+                        "turn": {
+                            "status": "failed",
+                            "error": {"codexErrorInfo": "rateLimitExceeded"},
+                        },
+                    }
+                ),
+            )
+
+        turn = SimpleNamespace(id="turn", stream=stream, interrupt=AsyncMock())
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.thread_start.return_value = SimpleNamespace(
+            id="session", turn=AsyncMock(return_value=turn)
+        )
+        with (
+            patch.object(execution, "AsyncCodex", return_value=client),
+            patch.object(
+                execution, "codex_session_limit", return_value=execution.SessionLimit("codex", 2000)
+            ),
+            self.assertRaises(execution.SessionLimit),
+        ):
+            await execution.execute(self.request(), lambda event: None)
+
+    async def test_native_agents_are_an_explicit_provider_local_option(self) -> None:
+        for provider in ("claude", "codex"):
+            for enabled in (False, True):
+                client = AsyncMock()
+                client.__aenter__.side_effect = RuntimeError("stop before provider")
+                target = "AsyncCodex" if provider == "codex" else "ClaudeSDKClient"
+                with (
+                    patch.object(execution, target, return_value=client) as constructor,
+                    self.assertRaisesRegex(RuntimeError, "stop before provider"),
+                ):
+                    await execution.execute(
+                        self.request(provider, allow_subagents=enabled), lambda event: None
+                    )
+                if provider == "codex":
+                    self.assertIn(
+                        f"agents.enabled={str(enabled).lower()}",
+                        constructor.call_args.args[0].config_overrides,
+                    )
+                else:
+                    self.assertEqual(
+                        constructor.call_args.kwargs["options"].disallowed_tools,
+                        [] if enabled else ["Agent", "Task"],
+                    )
 
 
 if __name__ == "__main__":

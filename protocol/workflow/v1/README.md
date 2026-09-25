@@ -43,3 +43,30 @@ the queue additionally enforces its wall-clock limit and reaps the process group
 
 `python/tests/test_workflows.py`, `tests/lua/workflows.lua`, and the queue's SDK
 executor tests exercise this boundary without credentials or live model calls.
+
+## Subscription failover metadata
+
+Agent Manager 0.2.1 introduces this additive contract; 0.2.0 remains a rollback
+release. `capabilities` is an offline, credential-free probe returning
+`{"version":1,"session_limit":true,"native_subagents":true}`. The queue must
+verify these capabilities before enabling its failover policy.
+
+A `run` request may set `allow_subagents: true` (default false). Codex enables
+its native multi-agent tools; Claude permits its native Agent/Task tools.
+The scheduler supplies delegation limits and retains task/worktree ownership.
+Provider changes always start fresh sessions and never reuse another provider's
+conversation identity or live agents.
+
+A confirmed five-hour rejection exits nonzero with
+`error {code:"session_limit",message,quota:{provider,window_seconds:18000,resets_at}}`.
+`resets_at` is an integer Unix timestamp, strictly in the future and at most
+five hours plus one minute away. Only these allowlisted fields survive redaction.
+Claude requires a rejected `RateLimitEvent` explicitly naming `five_hour`.
+Codex requires a terminal `rateLimitExceeded` error plus a fresh
+`account/rateLimits/read` snapshot for the Codex bucket with an exhausted
+300-minute window. Other exhausted windows or spend controls prevent classification.
+The pinned Python SDK exposes this read through its typed transport; no account
+credentials or raw exception text are forwarded. Warnings, missing/expired reset
+values, weekly limits, overload, authentication failures and bare 429s remain
+ordinary redacted failures. The worker does not switch providers, schedule
+retries, purchase credits or redeem resets; those decisions belong to the queue.
