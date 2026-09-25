@@ -1,7 +1,7 @@
 # M5 release and configuration adoption
 
-Status: v0.2.1 published on 2026-09-25; v0.2.2 Opus runtime compatibility
-update prepared on 2026-09-25, publication pending.
+Status: v0.2.1 published on 2026-09-25; local queue runtime override added
+on 2026-09-25 for Opus compatibility.
 
 M5 turns the M0-M4 runtime into one auditable production unit. It does not
 change the public broker or private worker protocols. Instead, it freezes their
@@ -12,7 +12,7 @@ and couples the released runtime to the exact Lazy pin in `nvim-config`.
 ## Compatibility lock
 
 `release/compatibility-v1.json` is the machine-checked release contract for
-v0.2.2:
+the current source revision (published artifacts retain their original pins):
 
 | Boundary                            | Exact revision or version                  |
 | ----------------------------------- | ------------------------------------------ |
@@ -157,14 +157,16 @@ dependencies.
 
 ## Opus 5.5 runtime compatibility
 
-Agent Manager 0.2.2 pins Claude Agent SDK 0.2.158, whose bundled Claude Code
+The updated source pins Claude Agent SDK 0.2.158, whose bundled Claude Code
 2.1.280 meets the API minimum for `claude-opus-5-5`. The previous 0.2.1
 release bundled 2.1.277: Sonnet sessions could run, but escalation to Opus
 failed before any model tokens were generated. The queue recorded only a
 worker failure and eventually exhausted its runnable dependency roots.
 
-Update the versioned runtime through the M5 installer; replacing the system
-`claude` executable has no effect on the SDK's bundled executable. Keep the
-previous release for paired rollback. After verification, retry the exact
-blocked queue task IDs through the queue launcher and resume its supervisor.
-A runtime upgrade alone does not change a task's durable blocked status.
+Use the source-pinned local override in `ops/queue-runtime/README.md` when
+queue recovery should not wait for a signed release. It installs into its own
+root and selects only the queue workflow interpreter; the published runtime
+and interactive broker stay intact. Replacing the system `claude` executable
+has no effect on the SDK's bundled executable. Retry exact blocked task IDs
+through the queue launcher after verification: a runtime update alone does
+not change durable blocked status.

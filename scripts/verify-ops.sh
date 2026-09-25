@@ -4,10 +4,13 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 m4_dir="$repo_root/ops/m4-durable-service"
 m5_dir="$repo_root/ops/m5-release-install"
+queue_dir="$repo_root/ops/queue-runtime"
 
 bash -n "$m4_dir"/*.sh "$m5_dir"/*.sh "$m5_dir/common.bash"
 shellcheck -x -P "$m4_dir" "$m4_dir"/*.sh
 shellcheck -x -P "$m5_dir" "$m5_dir"/*.sh "$m5_dir/common.bash"
+bash -n "$queue_dir"/*.sh "$queue_dir/common.bash"
+shellcheck -x -P "$queue_dir" "$queue_dir"/*.sh "$queue_dir/common.bash"
 for phase_script in \
   "$m4_dir"/*.sh \
   "$m4_dir/verify_runtime.py" \
