@@ -43,7 +43,14 @@ def main() -> int:
     args = parser.parse_args()
     try:
         if args.action == "capabilities":
-            emit({"version": 1, "session_limit": True, "native_subagents": True})
+            emit(
+                {
+                    "version": 1,
+                    "session_limit": True,
+                    "native_subagents": True,
+                    "helper_profiles": True,
+                }
+            )
         elif args.action == "run":
             asyncio.run(run_request())
         elif args.action == "inspect":
