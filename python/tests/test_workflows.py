@@ -376,10 +376,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                         constructor.call_args.args[0].config_overrides,
                     )
                 else:
-                    self.assertEqual(
-                        constructor.call_args.kwargs["options"].disallowed_tools,
-                        [] if enabled else ["Agent", "Task"],
-                    )
+                    options = constructor.call_args.kwargs["options"]
+                    self.assertEqual(options.disallowed_tools, [] if enabled else ["Agent", "Task"])
+                    # One SDK query per stage: delegation must return inline.
+                    self.assertEqual(options.env["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"], "1")
 
     async def test_research_helpers_have_explicit_models_effort_and_bounds(self) -> None:
         for provider, model in (("claude", "claude-sonnet-5"), ("codex", "gpt-5.6-terra")):
@@ -410,6 +410,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(set(helper.tools) & {"Agent", "Task", "Bash", "Edit", "Write"})
                 self.assertEqual(options.env["CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS"], "1")
                 self.assertEqual(options.env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"], "1")
+                self.assertEqual(options.env["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"], "1")
 
     def test_invalid_helper_policy_is_rejected_before_any_provider(self) -> None:
         for helper in (

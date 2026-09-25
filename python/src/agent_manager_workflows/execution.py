@@ -236,6 +236,12 @@ async def run_claude(request: ExecutionRequest, emit: Emit) -> None:
         output_format={"type": "json_schema", "schema": request.output_schema},
         include_partial_messages=True,
         extra_args={"no-session-persistence": None} if request.stage == "review" else {},
+        # Claude Code 2.1.280 runs subagents and shells in the background by
+        # default. A queue session is one SDK query: when the parent ends its
+        # turn to wait for a background helper, the query concludes and the
+        # structured result is forced without the helper's findings. Foreground
+        # delegation returns inline, and nothing outlives the stage.
+        env={"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"},
     )
     if helper := request.helper_profile:
         options.agents = {
@@ -253,6 +259,7 @@ async def run_claude(request: ExecutionRequest, emit: Emit) -> None:
         # and nested coding agents out of the queue's delegation path.
         options.allowed_tools = ["Agent(queue-research)"]
         options.env = {
+            **options.env,
             "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
             "CLAUDE_CODE_SUBAGENT_MODEL": helper.model,
             "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
