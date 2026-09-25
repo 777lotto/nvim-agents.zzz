@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from claude_agent_sdk import (
+    AgentDefinition,
     ClaudeAgentOptions,
     ClaudeSDKClient,
     RateLimitEvent,
@@ -20,9 +21,18 @@ from claude_agent_sdk import (
 from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 from openai_codex.errors import JsonRpcError
 from openai_codex.generated.v2_all import GetAccountRateLimitsResponse, ReasoningEffort
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Emit = Callable[[dict[str, Any]], None]
+
+
+class HelperProfile(BaseModel):
+    """Bounded provider-local research delegation; never a coding worker."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    model: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
+    effort: Literal["low", "medium", "high"] = "medium"
+    max_agents: int = Field(default=3, ge=1, le=3)
 
 
 class ExecutionRequest(BaseModel):
@@ -39,6 +49,17 @@ class ExecutionRequest(BaseModel):
     output_schema: dict[str, Any]
     resume: str | None = None
     allow_subagents: bool = False
+    helper_profile: HelperProfile | None = None
+
+    @model_validator(mode="after")
+    def validate_helpers(self) -> ExecutionRequest:
+        if self.helper_profile is not None:
+            if not self.allow_subagents:
+                raise ValueError("helper profile requires native subagents")
+            prefix = "claude-" if self.provider == "claude" else "gpt-"
+            if not self.helper_profile.model.startswith(prefix):
+                raise ValueError("helpers must use the session provider")
+        return self
 
 
 class SessionLimit(RuntimeError):
@@ -117,11 +138,24 @@ async def execute(request: ExecutionRequest, emit: Emit) -> None:
         await run_claude(request, emit)
 
 
+def codex_overrides(request: ExecutionRequest) -> tuple[str, ...]:
+    overrides = [f"agents.enabled={str(request.allow_subagents).lower()}"]
+    if helper := request.helper_profile:
+        overrides.extend(
+            (
+                f"agents.default_subagent_model={json.dumps(helper.model)}",
+                f"agents.default_subagent_reasoning_effort={json.dumps(helper.effort)}",
+                f"agents.max_concurrent_threads_per_session={helper.max_agents}",
+            )
+        )
+    return tuple(overrides)
+
+
 async def run_codex(request: ExecutionRequest, emit: Emit) -> None:
     config = CodexConfig(
         cwd=request.cwd,
         experimental_api=False,
-        config_overrides=(f"agents.enabled={str(request.allow_subagents).lower()}",),
+        config_overrides=codex_overrides(request),
     )
     sandbox = Sandbox.read_only if request.stage == "review" else Sandbox.full_access
     async with AsyncCodex(config) as codex:
@@ -203,6 +237,32 @@ async def run_claude(request: ExecutionRequest, emit: Emit) -> None:
         include_partial_messages=True,
         extra_args={"no-session-persistence": None} if request.stage == "review" else {},
     )
+    if helper := request.helper_profile:
+        options.agents = {
+            "queue-research": AgentDefinition(
+                description="Bounded read-only repository research for the queue parent.",
+                prompt="Answer only the assigned research question with source references. "
+                "Do not edit files, run mutating commands, or delegate further.",
+                tools=["Read", "Grep", "Glob", "WebSearch", "WebFetch"],
+                model=helper.model,
+                effort=helper.effort,
+                maxTurns=12,
+            )
+        }
+        # Expose only this helper type, keeping expensive parent inheritance
+        # and nested coding agents out of the queue's delegation path.
+        options.allowed_tools = ["Agent(queue-research)"]
+        options.env = {
+            "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
+            "CLAUDE_CODE_SUBAGENT_MODEL": helper.model,
+            "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
+        }
+        options.system_prompt = {
+            "type": "preset",
+            "preset": "claude_code",
+            "append": f"Use only queue-research for read-only help; at most {helper.max_agents} "
+            "helpers per session. Keep all edits in the parent.",
+        }
     async with ClaudeSDKClient(options=options) as client:
         await client.query(request.prompt)
         try:

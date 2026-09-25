@@ -381,6 +381,49 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                         [] if enabled else ["Agent", "Task"],
                     )
 
+    async def test_research_helpers_have_explicit_models_effort_and_bounds(self) -> None:
+        for provider, model in (("claude", "claude-sonnet-5"), ("codex", "gpt-5.6-terra")):
+            client = AsyncMock()
+            client.__aenter__.side_effect = RuntimeError("offline")
+            target = "AsyncCodex" if provider == "codex" else "ClaudeSDKClient"
+            with (
+                patch.object(execution, target, return_value=client) as constructor,
+                self.assertRaisesRegex(RuntimeError, "offline"),
+            ):
+                await execution.execute(
+                    self.request(
+                        provider,
+                        allow_subagents=True,
+                        helper_profile={"model": model, "effort": "medium", "max_agents": 2},
+                    ),
+                    lambda event: None,
+                )
+            if provider == "codex":
+                overrides = constructor.call_args.args[0].config_overrides
+                self.assertIn('agents.default_subagent_model="gpt-5.6-terra"', overrides)
+                self.assertIn('agents.default_subagent_reasoning_effort="medium"', overrides)
+                self.assertIn("agents.max_concurrent_threads_per_session=2", overrides)
+            else:
+                options = constructor.call_args.kwargs["options"]
+                helper = options.agents["queue-research"]
+                self.assertEqual((helper.model, helper.effort), (model, "medium"))
+                self.assertFalse(set(helper.tools) & {"Agent", "Task", "Bash", "Edit", "Write"})
+                self.assertEqual(options.env["CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS"], "1")
+                self.assertEqual(options.env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"], "1")
+
+    def test_invalid_helper_policy_is_rejected_before_any_provider(self) -> None:
+        for helper in (
+            {"model": "claude-sonnet-5"},
+            {"model": "gpt-5.6-terra", "max_agents": 4},
+            {"model": "gpt-5.6-terra", "max_agents": True},
+            {"model": "gpt-5.6-terra", "effort": "ultra"},
+            {"model": 'gpt-5.6-terra"\nother=true'},
+        ):
+            with self.subTest(helper=helper), self.assertRaises(ValueError):
+                self.request(allow_subagents=True, helper_profile=helper)
+        with self.assertRaises(ValueError):
+            self.request(helper_profile={"model": "gpt-5.6-terra"})
+
 
 if __name__ == "__main__":
     unittest.main()
