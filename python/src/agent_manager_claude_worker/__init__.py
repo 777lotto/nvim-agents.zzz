@@ -2,7 +2,7 @@
 
 from typing import Final
 
-__version__: Final = "0.2.1"
+__version__: Final = "0.2.2"
 WORKER_PROTOCOL_VERSION: Final = 1
 
 __all__ = ["WORKER_PROTOCOL_VERSION", "__version__"]

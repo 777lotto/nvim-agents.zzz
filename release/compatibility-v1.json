@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release_version": "0.2.1",
+  "release_version": "0.2.2",
   "target": "x86_64-unknown-linux-gnu",
   "toolchain": {
     "rust": "1.98.0",
@@ -17,8 +17,8 @@
     "openai_codex": "0.155.1",
     "codex_app_server": "0.152.0",
     "codex_profile": "codex-app-server-stable-v1",
-    "claude_agent_sdk": "0.2.157",
-    "claude_code": "2.1.277",
+    "claude_agent_sdk": "0.2.158",
+    "claude_code": "2.1.280",
     "claude_profile": "claude-agent-sdk-v1"
   },
   "ux": {

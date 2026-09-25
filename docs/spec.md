@@ -1223,10 +1223,11 @@ non-sensitive service status.
   the configuration; record actual provider versions at runtime.
 
 Implementation status: complete on 2026-09-02; v0.1.0 published on 2026-09-04.
-The v0.2.0 workflow-runtime release is prepared, with publication pending.
+The v0.2.1 workflow-runtime release is published. The v0.2.2 Opus runtime
+compatibility update is prepared, with publication pending.
 The release freezes the broker and worker protocol at version 1,
 Codex App Server 0.152.0, Claude Agent SDK
-0.2.157, Claude Code 2.1.277, the Codex workflow SDK 0.155.1, and the promoted Foundation/Styling/Chrome
+0.2.158, Claude Code 2.1.280, the Codex workflow SDK 0.155.1, and the promoted Foundation/Styling/Chrome
 revisions in `release/compatibility-v1.json`. Independent release builds are
 byte-identical and contain an internal payload checksum manifest plus an outer
 `SHA256SUMS`. The payload includes the exact relocatable Python interpreter, so

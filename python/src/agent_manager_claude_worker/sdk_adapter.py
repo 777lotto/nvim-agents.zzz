@@ -35,8 +35,8 @@ from .protocol import JsonObject, JsonValue, ProtocolFault, require_object
 
 SDK_DISTRIBUTION: Final = "claude-agent-sdk"
 COMPATIBILITY_PROFILE: Final = "claude-agent-sdk-v1"
-TESTED_SDK_VERSION: Final = "0.2.157"
-TESTED_CLAUDE_CODE_VERSION: Final = "2.1.277"
+TESTED_SDK_VERSION: Final = "0.2.158"
+TESTED_CLAUDE_CODE_VERSION: Final = "2.1.280"
 ACTIVE_SESSION_TIMEOUT_SECONDS: Final = 5.0
 MAX_ACTIVE_SESSION_BYTES: Final = 1024 * 1024
 MAX_ACTIVE_SESSIONS: Final = 1000

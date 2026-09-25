@@ -1,6 +1,6 @@
 # M5 release artifact installation
 
-This phase installs the attested Agent Manager v0.2.1 release without running
+This phase installs the attested Agent Manager v0.2.2 release without running
 Cargo, uv, pip, or any dependency resolver on the destination machine. The
 release archive contains the native Linux x86_64 broker, the exact relocatable
 Python 3.13 interpreter, and the hash-locked worker and workflow packages. Installation
@@ -28,13 +28,13 @@ healthy. Set `AGENT_MANAGER_REQUIRE_ATTESTATION=1` to require `gh attestation
 verify` in addition to the mandatory outer and inner checksums.
 
 The checked-in `m5.env` remains the reviewed production-container parameter
-boundary for an operator-driven install. Place the two v0.2.1 release assets at
+boundary for an operator-driven install. Place the two v0.2.2 release assets at
 its `RELEASE_ARCHIVE` and `RELEASE_CHECKSUMS` paths. Before moving assets into
 the container, the operator can verify the keyless GitHub build attestation:
 
 ```sh
 gh attestation verify \
-  agent-manager-v0.2.1-x86_64-unknown-linux-gnu.tar.gz \
+  agent-manager-v0.2.2-x86_64-unknown-linux-gnu.tar.gz \
   --repo 777lotto/nvim-agents.zzz
 ```
 
@@ -80,11 +80,15 @@ changed links, active services, and pre-existing versioned releases are
 preserved and reported instead of overwritten or deleted. Downloaded,
 checksummed release assets and status evidence remain as an audit cache.
 
-## Publish and adopt v0.2.1
+## Publish and adopt v0.2.2
 
-The installed v0.2.0 runtime has workflow execution but does not expose the
-quota metadata needed for failover. Publish v0.2.1 from a reviewed, verified commit on `bluff`; do not replace an existing tag or its artifacts. Cargo, Python (including the worker handshake), their lockfiles,
-and `release/compatibility-v1.json` must agree on `0.2.1`. Run `mise run verify`
+The v0.2.1 runtime bundles Claude Code 2.1.277, which the API refuses for
+Claude Opus 5.5. Version 0.2.2 pins Claude Agent SDK 0.2.158 and its bundled
+Claude Code 2.1.280. Updating the system `claude` command does not update this
+private SDK runtime. Publish v0.2.2 from a reviewed, verified commit on
+`bluff`; do not replace an existing tag or its artifacts. Cargo, Python
+(including the worker handshake), their lockfiles,
+and `release/compatibility-v1.json` must agree on `0.2.2`. Run `mise run verify`
 before merging. That gate builds twice, compares bytes, and exercises install,
 workflow startup, repeat verification and paired undo in temporary directories.
 
@@ -95,8 +99,8 @@ After fetching the merged commit into the operator's checkout, set
 ```sh
 git fetch origin bluff --tags
 git merge-base --is-ancestor "$release_commit" origin/bluff
-git tag -s v0.2.1 "$release_commit" -m 'Agent Manager v0.2.1: queue workflows runtime'
-git push origin refs/tags/v0.2.1
+git tag -s v0.2.2 "$release_commit" -m 'Agent Manager v0.2.2: Opus 5.5 runtime compatibility'
+git push origin refs/tags/v0.2.2
 ```
 
 The signing key must already be configured and recognized by GitHub. A failed
@@ -108,13 +112,13 @@ published assets from the operator plane:
 
 ```sh
 gh run list --repo 777lotto/nvim-agents.zzz --workflow release.yml --limit 5
-gh release download v0.2.1 --repo 777lotto/nvim-agents.zzz \
-  --pattern 'agent-manager-v0.2.1-x86_64-unknown-linux-gnu.tar.gz' \
-  --pattern SHA256SUMS --dir ./agent-manager-v0.2.1-assets
+gh release download v0.2.2 --repo 777lotto/nvim-agents.zzz \
+  --pattern 'agent-manager-v0.2.2-x86_64-unknown-linux-gnu.tar.gz' \
+  --pattern SHA256SUMS --dir ./agent-manager-v0.2.2-assets
 gh attestation verify \
-  ./agent-manager-v0.2.1-assets/agent-manager-v0.2.1-x86_64-unknown-linux-gnu.tar.gz \
+  ./agent-manager-v0.2.2-assets/agent-manager-v0.2.2-x86_64-unknown-linux-gnu.tar.gz \
   --repo 777lotto/nvim-agents.zzz
-gh attestation verify ./agent-manager-v0.2.1-assets/SHA256SUMS \
+gh attestation verify ./agent-manager-v0.2.2-assets/SHA256SUMS \
   --repo 777lotto/nvim-agents.zzz
 ```
 
