@@ -9,6 +9,11 @@ and releases use Semantic Versioning.
 
 ### Fixed
 
+- Queue Claude sessions set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so
+  `queue-research` helpers and shells run in the foreground. Claude Code
+  2.1.280 backgrounds subagents by default; a parent that ended its turn to
+  wait for them concluded the single SDK query and was forced to emit its
+  structured result without their findings.
 - `mise run verify` in an agent worktree no longer needs manual pointing:
   `scripts/test-ux.sh` also discovers the zemrip canonical clones
   `~/nvim-foundation`, `~/nvim-styler`, and `~/nvim-chrome`, and `mise run
