@@ -48,12 +48,24 @@ function Workflows:_buffer(name)
   vim.bo[buffer].buftype = "nofile"
   vim.bo[buffer].bufhidden = "hide"
   vim.bo[buffer].swapfile = false
-  vim.bo[buffer].filetype = "agent-manager"
+  vim.bo[buffer].filetype = name == "detail" and "agent-manager-conversation"
+    or name == "checklist" and "agent-manager-agents" or "agent-manager-" .. name
+  vim.b[buffer].agent_manager = { plugin_id = "agent.manager", pane = "workflow_" .. name }
+  if name == "checklist" or name == "detail" then
+    local enabled = self.view.opts == nil or self.view.opts.conversation_markdown ~= false
+    vim.b[buffer].agent_manager_markdown = enabled
+    if enabled then
+      pcall(vim.treesitter.language.register, "markdown", vim.bo[buffer].filetype)
+      pcall(vim.treesitter.start, buffer, "markdown")
+    end
+  end
   local function map(key, callback, description)
     vim.keymap.set("n", key, callback, { buffer = buffer, silent = true, desc = description })
   end
   map("gs", self.sessions, "Show standalone sessions")
   map("gw", function() self:open() end, "Show workflows")
+  map("1", self.sessions, "Show session directory")
+  map("2", function() self.view:focus("agents") end, "Show workflow directory")
   map("q", function() self.view:close() end, "Close Agent Manager")
   map("gp", function() self:toggle_provider() end, "Toggle provider suite after active sessions finish")
   map("gr", function() self:refresh(true) end, "Refresh workflow and selected session")
@@ -72,13 +84,23 @@ function Workflows:layout()
   local view = self.view
   if not view.tab or not vim.api.nvim_tabpage_is_valid(view.tab)
       or vim.api.nvim_get_current_tabpage() ~= view.tab then return end
-  local windows = vim.api.nvim_tabpage_list_wins(view.tab)
-  vim.api.nvim_set_current_win(windows[1])
-  for index = 2, #windows do pcall(vim.api.nvim_win_close, windows[index], true) end
-  self.windows = { checklist = windows[1] }
-  vim.api.nvim_win_set_buf(windows[1], self:_buffer("checklist"))
-  vim.cmd(vim.o.columns >= 100 and "botright vertical split" or "belowright split")
-  self.windows.detail = vim.api.nvim_get_current_win()
+  if not view._build_layout then
+    local windows = vim.api.nvim_tabpage_list_wins(view.tab)
+    self.windows = { checklist = windows[1] }
+    vim.api.nvim_set_current_win(windows[1])
+    vim.cmd("botright vertical split")
+    self.windows.detail = vim.api.nvim_get_current_win()
+  else
+    view:_build_layout("agents")
+    if not view.windows.agents then
+      vim.api.nvim_set_current_win(view.windows.conversation)
+      vim.cmd("topleft vertical split")
+      view.windows.agents = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_width(view.windows.agents, view.opts.agent_width or 28)
+    end
+    self.windows = { checklist = view.windows.agents, detail = view.windows.conversation }
+  end
+  vim.api.nvim_win_set_buf(self.windows.checklist, self:_buffer("checklist"))
   vim.api.nvim_win_set_buf(self.windows.detail, self:_buffer("detail"))
   for name, window in pairs(self.windows) do
     if view.style_pane then
@@ -93,12 +115,12 @@ function Workflows:layout()
     vim.wo[window].winfixheight = false
     vim.wo[window].winfixwidth = false
   end
-  view.windows = {}
   vim.api.nvim_set_current_win(self.windows.checklist)
 end
 
 function Workflows:open()
   self.view.workspace_mode = "workflows"
+  self.view.expanded = nil
   self:layout()
   self:render()
   self:refresh()
@@ -270,6 +292,7 @@ function Workflows:set_lines(name, lines)
   vim.bo[buffer].modifiable = true
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
   vim.bo[buffer].modifiable = false
+  vim.bo[buffer].modified = false
   return buffer
 end
 
@@ -277,8 +300,9 @@ function Workflows:render()
   if self.view.workspace_mode ~= "workflows" or not self.view.tab then return end
   local cursor = valid(self.windows.checklist) and vim.api.nvim_win_get_cursor(self.windows.checklist)
   local cursor_row = cursor and self.rows[cursor[1]]
-  local lines = { " WORKFLOWS   ·   gs Sessions", " Enter toggle/inspect · l/h expand/parent · gr refresh · gp provider suite", "" }
+  local lines = { "## 1 SESSIONS  ·  2 WORKFLOWS", " Enter toggle/inspect · l/h expand/parent · gr refresh · gp provider suite", "" }
   local highlights = {}
+  local span_highlights = {}
   self.rows = {}
   local function add(text, row, highlight)
     table.insert(lines, text)
@@ -306,28 +330,34 @@ function Workflows:render()
     local provider_status = ""
     if program.provider_switch_available then
       provider_status = " · suite " .. inline(provider_control.preferred_provider or "automatic")
-      if provider_control.pending_provider then
+      if provider_control.pending_provider and provider_control.pending_provider ~= vim.NIL then
         provider_status = provider_status .. " → " .. inline(provider_control.pending_provider) .. " after sessions finish (gp cancel)"
       elseif provider_control.last_event == "canceled-session-limit" then
         provider_status = provider_status .. " · switch canceled: session limit"
       end
     end
-    add(string.format(" %s %s / %s · %d/%d complete%s", marker(program_key), inline(program.repository),
+    add(string.format(" %s **%s / %s** · %d/%d complete%s", marker(program_key), inline(program.repository),
       inline(program.program), count, #program.tasks, (program.control.paused == true and " · paused" or "") .. provider_status),
       { key = program_key, kind = "program", program = program })
     if self.expanded[program_key] then
-      for _, phase in ipairs(phases) do
-        add(string.format("   %s %s · %d/%d complete", marker(phase.key), phase.name, phase.count, #phase.tasks),
+      for phase_index, phase in ipairs(phases) do
+        local phase_last = phase_index == #phases
+        local phase_prefix = phase_last and "   " or " │ "
+        add(string.format(" %s %s **%s** · %d/%d complete", phase_last and "└─" or "├─",
+          marker(phase.key), phase.name, phase.count, #phase.tasks),
           { key = phase.key, parent = program_key, kind = "phase", program = program })
         if self.expanded[phase.key] then
-          for _, task in ipairs(phase.tasks) do
+          for task_index, task in ipairs(phase.tasks) do
+            local task_last = task_index == #phase.tasks
             local key = program_key .. "/task/" .. task.id
             local mark = completed[task.status] and "x" or (active[task.status] and ">"
               or (task.status == "pending" or task.status == "ready") and " " or "!")
             local highlight = completed[task.status] and "AgentManagerStatusSuccess"
               or active[task.status] and "AgentManagerStatusWaiting" or nil
-            add(string.format("     %s [%s] %s · %s · %d sessions", marker(key), mark,
-              inline((task.goal or ""):match("[^\n]*")), inline(task.status), #task.attempts),
+            add(string.format(" %s%s %s [%s] *%s* · %s · %d sessions", phase_prefix,
+              task_last and "└─" or "├─", marker(key), mark,
+              inline(type(task.goal) == "string" and task.goal:match("[^\n]*") or ""),
+              inline(task.status), #task.attempts),
               { key = key, task_key = key, parent = phase.key, kind = "task", task = task, program = program }, highlight)
             if self.expanded[key] then
               for index, attempt in ipairs(task.attempts) do
@@ -336,11 +366,21 @@ function Workflows:render()
                   state = active[task.status] and index == #task.attempts and "active" or "recorded"
                 end
                 local identity = inline(attempt.session_id)
-                add(string.format("       %s · %s · %s · %s", inline(attempt.id),
-                  inline(attempt.provider), state, identity ~= "" and identity or "transcript identity unavailable"),
+                local lead = string.format(" %s%s%s ", phase_prefix,
+                  task_last and "   " or "│  ", index == #task.attempts and "└─" or "├─")
+                local provider = attempt.provider == "claude" and "◆" or "●"
+                local badge = state == "active" and "●" or state == "failed" and "×" or "○"
+                add(string.format("%s%s %s · %s · %s", lead, provider, badge,
+                  inline(attempt.id), identity ~= "" and identity or "transcript identity unavailable"),
                   { key = key .. "/session/" .. attempt.id, task_key = key, parent = key, kind = "session",
                     task = task, program = program, attempt = attempt },
                   active[task.status] and index == #task.attempts and "AgentManagerStatusWaiting" or nil)
+                span_highlights[#span_highlights + 1] = { #lines - 1, #lead,
+                  #lead + #provider, attempt.provider == "claude" and "AgentManagerProviderClaude"
+                    or "AgentManagerProviderCodex" }
+                span_highlights[#span_highlights + 1] = { #lines - 1,
+                  #lead + #provider + 1, #lead + #provider + 1 + #badge,
+                  state == "active" and "AgentManagerStatusSuccess" or "AgentManagerMuted" }
               end
               if #task.attempts == 0 then table.insert(lines, "       No sessions yet") end
             end
@@ -366,13 +406,19 @@ function Workflows:render()
   for _, highlight in ipairs(highlights) do
     vim.api.nvim_buf_add_highlight(buffer, self.view.namespace, highlight[2], highlight[1], 0, -1)
   end
-  local detail = { " TASK / SESSION · read-only", "" }
+  for _, highlight in ipairs(span_highlights) do
+    vim.api.nvim_buf_add_highlight(buffer, self.view.namespace, highlight[4],
+      highlight[1], highlight[2], highlight[3])
+  end
+  local detail = { "## TASK / SESSION", "" }
+  local detail_highlights = {}
   local row = self.selected
   if row then
-    table.insert(detail, " " .. row.task.id .. " · " .. row.task.status)
+    table.insert(detail, "### " .. inline(row.task.id) .. " · " .. inline(row.task.status))
     if row.attempt then session_metadata(row.attempt, detail) end
-    table.insert(detail, " " .. inline(row.task.summary or row.task.goal))
-    if row.task.heartbeat and row.task.heartbeat.at then
+    table.insert(detail, " " .. inline(row.task.summary ~= vim.NIL and row.task.summary or row.task.goal))
+    if type(row.task.heartbeat) == "table" and row.task.heartbeat.at
+        and row.task.heartbeat.at ~= vim.NIL then
       table.insert(detail, " " .. inline(row.task.heartbeat.phase) .. " · heartbeat "
         .. inline(row.task.heartbeat.at))
     end
@@ -383,21 +429,37 @@ function Workflows:render()
     for _, evidence in ipairs(row.task.evidence or {}) do table.insert(detail, " " .. inline(evidence)) end
     if row.attempt then
       table.insert(detail, "")
-      table.insert(detail, " " .. row.attempt.id .. " · " .. inline(row.attempt.session_id))
+      table.insert(detail, "### " .. inline(row.attempt.id) .. " · " .. inline(row.attempt.session_id))
       table.insert(detail, " " .. inline(row.attempt.summary))
       for _, evidence in ipairs(row.attempt.evidence or {}) do table.insert(detail, " " .. inline(evidence)) end
       for _, finding in ipairs(row.attempt.findings or {}) do table.insert(detail, " Finding: " .. inline(finding)) end
     end
     for _, message in ipairs(self.messages or {}) do
       table.insert(detail, "")
-      table.insert(detail, " " .. inline(message.role))
-      vim.list_extend(detail, vim.split(message.text:gsub("%z", "�"), "\n", { plain = true }))
+      local role = inline(message.role)
+      if role ~= "user" then
+        local label = role == "assistant" and inline(message.model ~= vim.NIL and message.model
+          or (row.attempt and row.attempt.model)) or role:upper()
+        table.insert(detail, "## " .. (label ~= "" and label or "Agent"))
+        detail_highlights[#detail_highlights + 1] = { #detail - 1,
+          role == "assistant" and "AgentManagerMessageAssistant" or "AgentManagerMessageSystem" }
+        table.insert(detail, "")
+      end
+      local body = tostring(message.text ~= vim.NIL and message.text or ""):gsub("%z", "�")
+      for _, line in ipairs(vim.split(body, "\n", { plain = true })) do
+        table.insert(detail, " " .. line)
+        if role == "user" then detail_highlights[#detail_highlights + 1] = { #detail - 1, "AgentManagerMessageUser" } end
+      end
     end
     if self.notice then table.insert(detail, " " .. self.notice) end
   else
     table.insert(detail, " Select a task to inspect its work, evidence, and sessions.")
   end
-  self:set_lines("detail", detail)
+  local detail_buffer = self:set_lines("detail", detail)
+  vim.api.nvim_buf_clear_namespace(detail_buffer, self.view.namespace, 0, -1)
+  for _, highlight in ipairs(detail_highlights) do
+    vim.api.nvim_buf_add_highlight(detail_buffer, self.view.namespace, highlight[2], highlight[1], 0, -1)
+  end
 end
 
 function Workflows:teardown()

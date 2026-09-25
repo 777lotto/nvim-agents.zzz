@@ -238,11 +238,12 @@ as the directory hint and follows the same managed-workspace flow. Prompting
 without a selected agent now explains how to start one instead of accepting
 input that cannot be sent.
 
-The workspace initially focuses Agents and maps `1`, `2`, and `3` directly to
-Agents, the Conversation prompt box, and Activity. `<Tab>` and `<S-Tab>` still
-cycle panes. In Normal mode, `we` toggles the current pane between expanded
-view and the previous split sizes. `w1`, `w2`, and `w3` switch panes while
-keeping expanded view active; expanded Conversation includes its prompt box.
+The workspace initially focuses the directory. In the directory, `1` shows
+sessions and `2` shows workflows. When the bottom window is focused, `1`
+shows the prompt and `2` shows the shortcut guide. `<Tab>` and `<S-Tab>` cycle
+the directory and conversation panes. In Normal mode, `we` toggles the current
+pane between expanded view and the previous split sizes. `w1` and `w2` switch
+panes while keeping expanded view active; expanded Conversation includes its prompt box.
 Press `<Esc>` first when typing in the prompt; use `i` to type in expanded
 Conversation. The prompt's Up/Down arrows move
 one visible wrapped line at a time in both Normal and Insert modes.
@@ -250,12 +251,11 @@ one visible wrapped line at a time in both Normal and Insert modes.
 Prompts submitted during a running turn are queued for that session and run in
 order after successful completion. The prompt box clears once queued, and a
 notification shows its queue position. Interrupting or failing the turn cancels
-pending follow-ups and reports the cancellation in Activity. Queues are held in
+pending follow-ups and reports the cancellation. Queues are held in
 broker memory (up to 32 pending prompts per session) and do not survive a broker
 restart. Explicit steering (`ts`) still sends input to the current turn.
 
-Token totals remain visible, but `usage.updated` events are omitted from the
-Activity log.
+Token totals appear under Usage in the directory.
 
 Conversation shows the responding model in a blue, unbolded label written as a
 level-two Markdown heading (`## model-name`) with a blank line after it. User
@@ -266,21 +266,21 @@ The transcript keeps provider text verbatim as Markdown source. Its
 `agent-manager-conversation` filetype is registered as a dialect of Neovim's
 bundled `markdown` treesitter parser, so headings, code fences, tables, and
 inline code are highlighted from the colorscheme. A Neovim configuration that
-installs render-markdown.nvim gets the drawn transcript by adding
-`agent-manager-conversation` to that plugin's `file_types`; Agent Manager's own
+installs render-markdown.nvim gets the drawn transcript through Chrome's pane
+integration. Without Chrome, add `agent-manager-conversation` and
+`agent-manager-agents` to that plugin's `file_types`; Agent Manager's own
 label and user-message highlights are applied on top and remain visible. Set
 `ui.conversation_markdown = false` to leave the transcript unparsed.
 
-Activity displays provider-supplied file patches with diff highlighting. `df`
-shows a workspace diff in Activity, including when the provider does not supply
-patch events. The inspected diff is a snapshot; press `df` again to refresh it.
+`df` shows a workspace diff in the conversation window. The inspected diff is
+a snapshot; press `df` again to refresh it.
 Commands are grouped under
 buffer-local prefixes: `a` for agent settings (`am`, `ae`), `s` for sessions
 (`sn`, `so`, `sf`, `sa`), `t` for the current turn (`tp`, `ts`, `ti`, `tc`),
 `d` for diff/delete (`df`, `ds`), and `g` for navigation/refresh (`ga`, `gc`,
 `gt`, `gr`, `g?`). `y` means yes/allow
 and `n` means no/deny only for the focused human request. `<CR>` toggles a
-directory, opens a file or session, or answers a question; `h` and `l` collapse
+directory, opens a session, or answers a question; `h` and `l` collapse
 and expand tree rows. `q` closes only the view.
 
 When `which-key.nvim` is available, Agent Manager registers those five prefixes
@@ -289,19 +289,21 @@ and `t` are built-in keys, a host that wants their menus to open automatically m
 include them as normal-mode entries in which-key's `opts.triggers`; its
 `<auto>` trigger intentionally skips existing built-ins. Agent Manager does not
 call `which-key.show()` from a mapping, call which-key setup, or replace global
-mappings. The key sequences still work when which-key is absent. Wide displays
-show agents, conversation, and activity together; medium and narrow displays
-switch the same buffers without losing model state.
+mappings. The key sequences still work when which-key is absent. The directory,
+conversation, and bottom input windows retain their positions when switching
+between sessions and workflows.
 
 The Agents pane is a lazy filesystem tree rooted at the full home path (for
-example, `/home/ai/`). It includes ordinary files and directories whether or
-not a session exists there; known managed repositories and every discovered
+example, `/home/ai/`). It includes directories whether or not a session exists
+there; known managed repositories and every discovered
 Codex/Claude session—live or saved—are overlaid beneath their directory.
 Directories with sessions anywhere below them sort before directories without
 sessions. Child directory contents begin collapsed. A visible directory's
 direct sessions remain available in a highlighted, independently expandable
-`Sessions` branch even while that directory's files and subdirectories are
-collapsed. Sessions are ordered by latest activity across both providers. The
+`Sessions` branch even while that directory's subdirectories are collapsed.
+The first five sessions are shown by default; select the group for all, none,
+and five. Historical paths are marked `[past cwd]` and cannot be used to start
+a new session. Sessions are ordered by latest activity across both providers. The
 key at the top maps provider symbols (`● Codex`, `◆ Claude`) and state symbols
 (`● active`, `○ resume`, `? check`, `× ended`) to their semantic colors. Each
 session row contains only its two colored symbols and title. A resumable session
@@ -543,10 +545,11 @@ credential-free agent plane never receives its value.
 # Shared pane presentation
 
 When UX Chrome's `ux_chrome.panes` API is available, Agent Manager attaches its
-navigation, conversation, activity, approval, and input windows to shared pane
+directory, conversation, workflow detail, approval, and bottom windows to shared pane
 roles. Foundation/Styling can edit role defaults or individual pane overrides
 without changing Agent Manager's content or actions. The conversation declares
-Markdown content unless `ui.conversation_markdown` is disabled. Older Chrome
+Markdown content unless `ui.conversation_markdown` is disabled. The directory
+and workflow tree also declare Markdown content. Older Chrome
 versions and installations without Chrome retain the native presentation.
 
 ### Shared navigation components
