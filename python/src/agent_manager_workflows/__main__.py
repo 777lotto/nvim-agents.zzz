@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .execution import ExecutionRequest, execute
+from .execution import ExecutionRequest, SessionLimit, execute
 from .observation import default_root, history, inspect_all
 
 
@@ -34,7 +34,7 @@ async def run_request() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("run", "inspect", "history"))
+    parser.add_argument("action", choices=("run", "inspect", "history", "capabilities"))
     parser.add_argument("--root", type=Path, default=default_root())
     parser.add_argument("--repository")
     parser.add_argument("--program")
@@ -42,7 +42,9 @@ def main() -> int:
     parser.add_argument("--attempt")
     args = parser.parse_args()
     try:
-        if args.action == "run":
+        if args.action == "capabilities":
+            emit({"version": 1, "session_limit": True, "native_subagents": True})
+        elif args.action == "run":
             asyncio.run(run_request())
         elif args.action == "inspect":
             emit(inspect_all(args.root))
@@ -54,6 +56,9 @@ def main() -> int:
                     history(args.root, args.repository, args.program, args.task, args.attempt)
                 )
             )
+    except SessionLimit as error:
+        emit(error.frame())
+        return 1
     except (Exception, asyncio.CancelledError) as error:
         # Provider exceptions can contain prompts, tool payloads or auth material.
         emit(

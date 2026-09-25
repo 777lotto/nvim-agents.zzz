@@ -1,6 +1,6 @@
 # M5 release artifact installation
 
-This phase installs the attested Agent Manager v0.2.0 release without running
+This phase installs the attested Agent Manager v0.2.1 release without running
 Cargo, uv, pip, or any dependency resolver on the destination machine. The
 release archive contains the native Linux x86_64 broker, the exact relocatable
 Python 3.13 interpreter, and the hash-locked worker and workflow packages. Installation
@@ -28,13 +28,13 @@ healthy. Set `AGENT_MANAGER_REQUIRE_ATTESTATION=1` to require `gh attestation
 verify` in addition to the mandatory outer and inner checksums.
 
 The checked-in `m5.env` remains the reviewed production-container parameter
-boundary for an operator-driven install. Place the two v0.2.0 release assets at
+boundary for an operator-driven install. Place the two v0.2.1 release assets at
 its `RELEASE_ARCHIVE` and `RELEASE_CHECKSUMS` paths. Before moving assets into
 the container, the operator can verify the keyless GitHub build attestation:
 
 ```sh
 gh attestation verify \
-  agent-manager-v0.2.0-x86_64-unknown-linux-gnu.tar.gz \
+  agent-manager-v0.2.1-x86_64-unknown-linux-gnu.tar.gz \
   --repo 777lotto/nvim-agents.zzz
 ```
 
@@ -80,12 +80,11 @@ changed links, active services, and pre-existing versioned releases are
 preserved and reported instead of overwritten or deleted. Downloaded,
 checksummed release assets and status evidence remain as an audit cache.
 
-## Publish and adopt v0.2.0
+## Publish and adopt v0.2.1
 
-The existing v0.1.0 release does not contain the queue workflow runtime. Publish
-v0.2.0 from a reviewed, verified commit on `bluff`; do not replace the v0.1.0 tag
-or artifacts. Cargo, Python (including the worker handshake), their lockfiles,
-and `release/compatibility-v1.json` must agree on `0.2.0`. Run `mise run verify`
+The installed v0.2.0 runtime has workflow execution but does not expose the
+quota metadata needed for failover. Publish v0.2.1 from a reviewed, verified commit on `bluff`; do not replace an existing tag or its artifacts. Cargo, Python (including the worker handshake), their lockfiles,
+and `release/compatibility-v1.json` must agree on `0.2.1`. Run `mise run verify`
 before merging. That gate builds twice, compares bytes, and exercises install,
 workflow startup, repeat verification and paired undo in temporary directories.
 
@@ -96,8 +95,8 @@ After fetching the merged commit into the operator's checkout, set
 ```sh
 git fetch origin bluff --tags
 git merge-base --is-ancestor "$release_commit" origin/bluff
-git tag -s v0.2.0 "$release_commit" -m 'Agent Manager v0.2.0: queue workflows runtime'
-git push origin refs/tags/v0.2.0
+git tag -s v0.2.1 "$release_commit" -m 'Agent Manager v0.2.1: queue workflows runtime'
+git push origin refs/tags/v0.2.1
 ```
 
 The signing key must already be configured and recognized by GitHub. A failed
@@ -109,13 +108,13 @@ published assets from the operator plane:
 
 ```sh
 gh run list --repo 777lotto/nvim-agents.zzz --workflow release.yml --limit 5
-gh release download v0.2.0 --repo 777lotto/nvim-agents.zzz \
-  --pattern 'agent-manager-v0.2.0-x86_64-unknown-linux-gnu.tar.gz' \
-  --pattern SHA256SUMS --dir ./agent-manager-v0.2.0-assets
+gh release download v0.2.1 --repo 777lotto/nvim-agents.zzz \
+  --pattern 'agent-manager-v0.2.1-x86_64-unknown-linux-gnu.tar.gz' \
+  --pattern SHA256SUMS --dir ./agent-manager-v0.2.1-assets
 gh attestation verify \
-  ./agent-manager-v0.2.0-assets/agent-manager-v0.2.0-x86_64-unknown-linux-gnu.tar.gz \
+  ./agent-manager-v0.2.1-assets/agent-manager-v0.2.1-x86_64-unknown-linux-gnu.tar.gz \
   --repo 777lotto/nvim-agents.zzz
-gh attestation verify ./agent-manager-v0.2.0-assets/SHA256SUMS \
+gh attestation verify ./agent-manager-v0.2.1-assets/SHA256SUMS \
   --repo 777lotto/nvim-agents.zzz
 ```
 
@@ -134,10 +133,18 @@ the four numbered M5 phases as `ai`, without sudo, then verify:
   -m agent_manager_workflows --help
 ```
 
-With admission still paused, run zemrip's media/plugin amendment from its
-reviewed merged source in this order: `00-preflight.sh`, `10-apply.sh`,
-`20-continue.sh`, `90-verify.sh`. Its preflight additionally probes the workflow
-runtime inside the review sandbox. Let the amendment's continuation step
-resume admission. Do not retry or reset R10 as part of this upgrade. Keep the
-old release and M5 undo state; follow the amendment's own rollback restrictions
-once task evidence has progressed.
+With admission still paused, verify the quota contract before enabling failover:
+
+```sh
+~/.local/share/agent-manager/venv/bin/python -B -I \
+  -m agent_manager_workflows capabilities
+```
+
+The output must report version 1, `session_limit: true` and
+`native_subagents: true`. From the exact reviewed source merged into Zemrip's
+`rust` branch, run `tools/agents/workspace/queue_amend.py` with `preflight`,
+`apply`, then `verify`, each with `--source <absolute-source>` and
+`--amendment queue-provider-failover`. Resume admission using the installed
+manifest and start `zemrip-rust-queue.service`. Do not reset task attempts or
+budgets. Preserve the old 0.2.0 runtime and M5 undo state; the queue amendment
+refuses rollback after task history progresses.
