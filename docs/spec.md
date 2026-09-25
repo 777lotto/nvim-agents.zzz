@@ -610,10 +610,8 @@ emulated with a destructive substitute.
 The default command opens a dedicated tab. A split entry point is optional for
 quick inspection. Layout follows the UX responsive grammar:
 
-- **Wide, 140 columns or more:** agent rail, conversation, and activity/context
-  rail.
-- **Medium, 90–139 columns:** agent rail plus conversation; activity replaces
-  the conversation on demand.
+- **Wide and medium, 90 columns or more:** directory and conversation, with a
+  bottom prompt or shortcut window.
 - **Narrow, under 90 columns:** one pane at a time with explicit pane cycling.
 
 If a mature UX Panels layout primitive publishes different canonical
@@ -624,13 +622,15 @@ maintaining a competing set.
 
 - **Agents:** provider, title, cwd/worktree, precise status, unread marker, and
   pending-approval count. A lazy filesystem tree begins at the user's full home
-  path and shows files and directories independently of session state.
+  path and shows directories independently of session state.
   Known managed repositories, broker-owned agents, and all active and saved
   external CLI sessions are overlaid below their actual directories.
   Directories with descendant sessions sort first, directory contents begin
   collapsed, and each visible directory's direct sessions remain in a
   highlighted, independently collapsible `Sessions` branch even when its
-  filesystem children are collapsed. Sessions are ordered by latest activity.
+  filesystem children are collapsed. Five sessions appear initially; selecting
+  the group cycles through all, none, and five. Sessions are ordered by latest activity.
+  Historical paths carry `[past cwd]` and cannot start a new session.
   Session
   refresh does not wait on or initiate the lifecycle authority's full cleanup
   audit. The opening project and a focused directory supply repository context
@@ -644,8 +644,7 @@ maintaining a competing set.
   The prompt wraps at word boundaries, expands between configured minimum and
   maximum heights, resets after a successful send, and receives focus after
   model selection.
-- **Activity:** ordered tool, command, file, and usage events with expandable
-  native detail.
+- **Usage:** session token totals below the selected directory workspace.
 - **Approval/question:** focused decision view that cannot be hidden by normal
   streaming redraws.
 - **Diff:** repository or file diff with provider/agent attribution.
@@ -689,7 +688,7 @@ Mappings are buffer-local and configurable. Initial defaults are:
 | Key                 | Action                                                   |
 | ------------------- | -------------------------------------------------------- |
 | `j` / `k`           | Move through the focused view.                           |
-| `1` / `2` / `3`     | Focus Agents, Conversation prompt, or Activity directly. |
+| `1` / `2`         | Switch sessions/workflows in the directory; prompt/shortcuts in the bottom window. |
 | `<Tab>` / `<S-Tab>` | Cycle visible panes.                                     |
 | `<CR>`              | Send in the prompt box; elsewhere open, expand, or act.  |
 | `<C-j>`             | Insert a newline in the prompt box.                      |
@@ -699,7 +698,7 @@ Mappings are buffer-local and configurable. Initial defaults are:
 | `tp` / `ts`         | Prompt / steer the selected agent.                       |
 | `ti` / `tc`         | Confirm interrupt / queue explicit editor context.       |
 | `df` / `ds`         | Show the focused diff / delete focused provider history. |
-| `ga` / `gc` / `gt`  | Focus Agents / Conversation / Activity.                  |
+| `ga` / `gc` / `gt`  | Focus directory / Conversation / shortcuts.              |
 | `gr`                | Refresh the filesystem and provider sessions.            |
 | `y` / `n`           | Yes/allow or no/deny only for a focused human request.   |
 | `h` / `l`           | Collapse / expand a directory row.                       |

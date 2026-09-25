@@ -163,19 +163,19 @@ view disconnects Neovim only; it never shuts down the supervised broker.
 ==============================================================================
 4. Workspace                                      *agent-manager-workspace*
 
-The native workspace opens with focus in Agents and uses agents, conversation,
-prompt, and activity buffers. Their headings are numbered: 1 focuses Agents, 2
-focuses the prompt box at the bottom of Conversation, and 3 focuses Activity.
+The native workspace opens with focus in the directory and uses directory,
+conversation, and bottom input windows. In the directory, 1 shows sessions and
+2 shows workflows. In the bottom window, 1 shows the prompt and 2 shows the
+shortcut guide.
 Normal-mode we expands the current pane; pressing we again restores the previous
 split sizes. Expanded Conversation keeps its prompt box. Press <Esc> to leave
-Insert mode before using we or w1/w2/w3. Prompt Up/Down move by visible wrapped
+Insert mode before using we or w1/w2. Prompt Up/Down move by visible wrapped
 lines in both Normal and Insert modes.
 
 Prompts submitted while running are queued per session and run in order after
-successful completion. Interrupt/failure cancels queued follow-ups with an
-Activity notice. Up to 32 prompts can wait in broker memory; they do not survive
-a broker restart. ts still steers the current turn. Token totals remain visible,
-but usage.updated events do not appear in the Activity log.
+successful completion. Interrupt/failure cancels queued follow-ups. Up to 32
+prompts can wait in broker memory; they do not survive a broker restart. ts
+still steers the current turn. Token totals appear under Usage in the directory.
 
 Conversation labels assistant replies with the model name in blue. The label
 is a level-two Markdown heading (`## model-name`) followed by a blank line, so
@@ -187,26 +187,28 @@ The transcript is Markdown source and keeps provider text verbatim. Its
 buffer filetype stays `agent-manager-conversation`, registered as a dialect of
 the bundled `markdown` treesitter parser, so headings, code fences, tables, and
 inline code take the colorscheme's Markdown highlights. An installed
-render-markdown.nvim draws the transcript once `agent-manager-conversation` is
-listed in its `file_types`; Agent Manager's own message highlights are applied
+render-markdown.nvim draws the transcript through Chrome's pane integration.
+Without Chrome, list `agent-manager-conversation` and `agent-manager-agents`
+in its `file_types`; Agent Manager's own message highlights are applied
 above the renderer's and stay in effect. Set `ui.conversation_markdown = false`
 to keep the transcript unparsed.
 
-Activity shows file patches supplied by the provider with diff highlighting.
-The df command opens a workspace diff snapshot in Activity; repeat df to refresh.
+The df command opens a workspace diff snapshot in Conversation; repeat df to refresh.
 
-Wide displays show all three panes. Medium and narrow displays may also use
+Wide displays show the directory and conversation panes. Narrow displays may use
 <Tab> and <S-Tab> to cycle panes.
 
 The Agents pane is a lazy filesystem tree rooted at the full home directory
-(for example, `/home/ai/`). Files and directories appear independently of
+(for example, `/home/ai/`). Directories appear independently of
 session state. Known managed repositories, broker-owned agents, and active or
 saved standalone Codex/Claude sessions are overlaid beneath their directories.
 Directories containing sessions sort before directories without sessions.
 Directory contents begin collapsed. Each visible directory's direct sessions
 remain indented beneath a highlighted, independently collapsible "Sessions"
-row even while that directory's files and subdirectories are collapsed. They
-are ordered by most recent activity across providers.
+row even while that directory's subdirectories are collapsed. The first five
+sessions appear initially; selecting the group cycles through all, none, and
+five. They are ordered by most recent activity across providers.
+Historical paths carry `[past cwd]`; a new session cannot start there.
 The project where Agent Manager was opened carries a `[cwd]` marker; repository
 directories learned from managed sessions or explicit inventory carry
 `[repo]`. Place the cursor on a directory and press `sn` to use it as the
@@ -243,21 +245,22 @@ originating terminal owns them. The tree is refreshed when the workspace opens
 and with `gr`. Set `ui.external_sessions` to false to hide external CLI
 sessions; `ui.external_session_limit` caps each provider query from 1 to 1000.
 
-    1 / 2 / 3 focus Agents / Conversation / Activity
+    directory: 1 sessions / 2 workflows
+    bottom:    1 prompt / 2 shortcuts
     sn / so start a session / open or continue one
     sf / sa fork / archive a session
     am / ae change model / effort for the next prompt
     tp / ts prompt / steer the selected agent
     ti / tc confirm interrupt / queue explicit editor context
     df / ds show a focused diff / delete focused provider history
-    ga/gc/gt focus Agents / Conversation / Activity
+    ga/gc/gt focus directory / Conversation / shortcuts
     gr      refresh the filesystem and provider sessions
     y / n   yes/allow or no/deny only the focused human request
     <CR>    send in the prompt box; otherwise toggle/open/answer the focused row
     <C-j>   insert a newline in the prompt box
     h / l   collapse / expand a directory
     we      toggle expanded pane and restore previous split sizes
-    w1/w2/w3 focus Agents / Conversation / Activity, preserving expanded mode
+    w1/w2 focus directory / Conversation, preserving expanded mode
     <Tab>   cycle panes
     ? / g?  show mapping help
     q       close the workspace view

@@ -233,9 +233,89 @@ end
 
 local function layout_test()
   local View = require("agent_manager.view")
-  assert_equal(View.layout_for(160).mode, "wide", "wide layout")
+  assert_equal(View.layout_for(160).mode, "medium", "two pane layout")
   assert_equal(View.layout_for(100).mode, "medium", "medium layout")
   assert_equal(View.layout_for(80).mode, "narrow", "narrow layout")
+end
+
+local function directory_markdown_and_bottom_test()
+  local columns = vim.o.columns
+  vim.o.columns = 160
+  local Model = require("agent_manager.model")
+  local View = require("agent_manager.view")
+  local home = vim.fn.tempname() .. "-agent-manager-directory"
+  assert_equal(vim.fn.mkdir(home, "p"), 1)
+  home = assert(vim.uv.fs_realpath(home))
+  vim.fn.writefile({ "hidden" }, home .. "/note.txt")
+  local sessions = {}
+  for index = 1, 7 do
+    sessions[#sessions + 1] = { provider_session_id = "session-" .. index,
+      cwd = home, title = "session " .. index, active = false,
+      updated_at = string.format("2026-09-01T00:00:%02dZ", index) }
+  end
+  local model = Model.new({ max_events = 8 })
+  model:apply_external_sessions("codex", sessions, true)
+  model:apply_external_sessions("claude", { { provider_session_id = "past-session",
+    cwd = home .. "/renamed", title = "past session", active = false } }, true)
+  local view = View.new(model, {}, { home = home })
+  assert(view:open())
+  local buffer = view.buffers.agents
+  assert_equal(vim.treesitter.language.get_lang("agent-manager-agents"), "markdown")
+  assert(vim.treesitter.highlighter.active[buffer], "directory Markdown parser")
+  assert(buffer_contains(buffer, "**Sessions** (7 · first 5)"), "initial session limit")
+  assert(buffer_contains(buffer, "session 3") and not buffer_contains(buffer, "session 2"), "only newest five")
+  assert(not buffer_contains(buffer, "note.txt"), "files stay hidden")
+  local past_row = assert(buffer_line_number(buffer, "renamed/**  [past cwd]"))
+  vim.api.nvim_win_set_cursor(view.windows.agents, { past_row, 0 })
+  assert_equal(view:_start_context(), false, "historical path cannot start a new session")
+  local group = assert(buffer_line_number(buffer, "**Sessions**"))
+  vim.api.nvim_win_set_cursor(view.windows.agents, { group, 0 })
+  vim.api.nvim_feedkeys(vim.keycode("<CR>"), "x", false)
+  assert(vim.wait(1000, function() return buffer_contains(buffer, "session 1") end), "expand all sessions")
+  vim.api.nvim_win_set_cursor(view.windows.agents, { group, 0 })
+  vim.api.nvim_feedkeys("h", "x", false)
+  assert(vim.wait(1000, function() return not buffer_contains(buffer, "session 7") end), "collapse sessions")
+  vim.api.nvim_win_set_cursor(view.windows.agents, { group, 0 })
+  vim.api.nvim_feedkeys(vim.keycode("<CR>"), "x", false)
+  assert(vim.wait(1000, function() return buffer_contains(buffer, "session 3") end), "restore first five")
+  assert(view:bottom(2))
+  assert_equal(vim.api.nvim_win_get_buf(view.windows.prompt), view.buffers.bottom_help, "shortcuts in bottom window")
+  assert(buffer_contains(view.buffers.bottom_help, "sn      start a new session"), "shortcut list visible")
+  vim.api.nvim_feedkeys("1", "x", false)
+  assert_equal(vim.api.nvim_win_get_buf(view.windows.prompt), view.buffers.prompt, "prompt shortcut switch")
+  view:teardown()
+  vim.o.columns = columns
+  vim.fn.delete(home, "rf")
+end
+
+local function unified_workflow_layout_test()
+  local Model = require("agent_manager.model")
+  local View = require("agent_manager.view")
+  local Workflows = require("agent_manager.workflows")
+  local columns = vim.o.columns
+  vim.o.columns = 160
+  local view = View.new(Model.new({ max_events = 8 }), {}, { home = vim.fn.tempname() })
+  local workflows = Workflows.new(view, { python = false, refresh_ms = 60000 }, function()
+    view.workspace_mode = "sessions"
+    view:_build_layout("agents")
+    view:render()
+  end)
+  view.workflows = workflows
+  view.actions.workflows = function() workflows:open() end
+  assert(view:open())
+  view:directory_view(2)
+  assert_equal(view.workspace_mode, "workflows")
+  assert_equal(vim.api.nvim_win_get_buf(view.windows.agents), workflows.buffers.checklist,
+    "workflow tree reuses directory window")
+  assert_equal(vim.api.nvim_win_get_buf(view.windows.conversation), workflows.buffers.detail,
+    "workflow transcript reuses conversation window")
+  assert(vim.api.nvim_win_is_valid(view.windows.prompt), "workflow keeps bottom window")
+  vim.api.nvim_set_current_win(view.windows.agents)
+  vim.api.nvim_feedkeys("1", "x", false)
+  assert_equal(view.workspace_mode, "sessions", "directory 1 returns to sessions")
+  assert_equal(vim.api.nvim_win_get_buf(view.windows.agents), view.buffers.agents)
+  view:teardown()
+  vim.o.columns = columns
 end
 
 local function workspace_view_navigation_test()
@@ -319,9 +399,9 @@ local function workspace_view_navigation_test()
   assert(view:open())
   view:render()
   local status = view:status()
-  assert(buffer_has_line(status.buffers.agents, " ▾ " .. home .. "/"), "full home root label")
+  assert(buffer_contains(status.buffers.agents, "**" .. home .. "/**"), "Markdown home root label")
   assert(buffer_contains(status.buffers.agents, "notes/"), "unrelated home directory")
-  assert(buffer_contains(status.buffers.agents, "README.txt"), "unrelated home file")
+  assert(not buffer_contains(status.buffers.agents, "README.txt"), "directory omits files")
   assert(not buffer_contains(status.buffers.agents, "(unknown)"), "blank session cwd uses home")
   assert(buffer_contains(status.buffers.agents, "key · ● Codex · ◆ Claude"), "provider legend")
   assert(buffer_contains(status.buffers.agents, "● active · ○ resume"), "live-state legend")
@@ -339,7 +419,7 @@ local function workspace_view_navigation_test()
   local projects_row = assert(buffer_line_number(status.buffers.agents, "projects/"))
   local notes_row = assert(buffer_line_number(status.buffers.agents, "notes/"))
   assert(projects_row < notes_row, "directories containing sessions sort first")
-  for _, pane in ipairs({ "agents", "conversation", "activity" }) do
+  for _, pane in ipairs({ "agents", "conversation" }) do
     assert(view:focus(pane))
     assert_equal(view:status().active_pane, pane, "numbered pane navigation")
   end
@@ -348,31 +428,29 @@ local function workspace_view_navigation_test()
   vim.api.nvim_win_set_cursor(0, { projects_row, 0 })
   vim.api.nvim_feedkeys("l", "x", false)
   assert(vim.wait(1000, function()
-    return buffer_contains(status.buffers.agents, "agent-manager/  [repo]")
+    return buffer_contains(status.buffers.agents, "agent-manager/**  [repo]")
   end), "projects directory expansion")
   assert(
     buffer_contains(status.buffers.agents, "◆ ● · claude fixture"),
     "directory sessions ignore file collapse"
   )
-  assert(buffer_contains(status.buffers.agents, "Sessions (3)"), "dedicated session group")
+  assert(buffer_contains(status.buffers.agents, "**Sessions** (3)"), "dedicated session group")
   assert(not buffer_contains(status.buffers.agents, "project.txt"), "collapsed directory hides files only")
   local repository_row = assert(
-    buffer_line_number(status.buffers.agents, "agent-manager/  [repo]"),
+    buffer_line_number(status.buffers.agents, "agent-manager/**  [repo]"),
     "registered repository row"
   )
   vim.api.nvim_win_set_cursor(0, { repository_row, 0 })
   vim.api.nvim_feedkeys("l", "x", false)
-  assert(vim.wait(1000, function()
-    return buffer_contains(status.buffers.agents, "project.txt")
-  end), "expanded directory file")
+  assert(not buffer_contains(status.buffers.agents, "project.txt"), "expanded directory still omits files")
   vim.api.nvim_win_set_cursor(0, { repository_row, 0 })
   vim.api.nvim_feedkeys("h", "x", false)
   assert(vim.wait(1000, function()
     return not buffer_contains(status.buffers.agents, "project.txt")
   end), "directory file collapse")
-  assert(buffer_contains(status.buffers.agents, "Sessions (3)"), "session group survives file collapse")
+  assert(buffer_contains(status.buffers.agents, "**Sessions** (3)"), "session group survives file collapse")
   assert(buffer_contains(status.buffers.agents, "◆ ● · claude fixture"), "session rows survive file collapse")
-  local session_group_row = assert(buffer_line_number(status.buffers.agents, "Sessions (3)"))
+  local session_group_row = assert(buffer_line_number(status.buffers.agents, "**Sessions** (3)"))
   vim.api.nvim_win_set_cursor(0, { session_group_row, 0 })
   vim.api.nvim_feedkeys(vim.keycode("<CR>"), "x", false)
   assert(vim.wait(1000, function()
@@ -492,7 +570,6 @@ local function expanded_panes_test()
   local view = View.new(model, {}, { home = vim.fn.tempname() })
   assert(view:open())
   vim.api.nvim_win_set_width(view.windows.agents, 33)
-  vim.api.nvim_win_set_width(view.windows.activity, 44)
   local original = {}
   for name, window in pairs(view.windows) do
     original[name] = { vim.api.nvim_win_get_width(window), vim.api.nvim_win_get_height(window) }
@@ -503,11 +580,11 @@ local function expanded_panes_test()
     vim.cmd("stopinsert")
   end
   -- Mouse/window navigation must expand the actual current window too.
-  vim.api.nvim_set_current_win(view.windows.activity)
+  vim.api.nvim_set_current_win(view.windows.conversation)
   keys("we")
   assert(view:status().expanded)
-  assert_equal(view:status().active_pane, "activity", "expand actual active pane")
-  assert_equal(#vim.api.nvim_tabpage_list_wins(view.tab), 1, "activity occupies workspace")
+  assert_equal(view:status().active_pane, "conversation", "expand actual active pane")
+  assert_equal(#vim.api.nvim_tabpage_list_wins(view.tab), 2, "conversation keeps prompt")
   keys("w2")
   assert_equal(view:status().active_pane, "conversation", "expanded conversation switch")
   assert_equal(#vim.api.nvim_tabpage_list_wins(view.tab), 2, "expanded conversation retains input")
@@ -515,10 +592,10 @@ local function expanded_panes_test()
   keys("w1")
   assert_equal(view:status().active_pane, "agents", "expanded agents switch")
   assert_equal(#vim.api.nvim_tabpage_list_wins(view.tab), 1, "agents occupies workspace")
-  keys("w3")
+  keys("w2")
   keys("we")
   assert(not view:status().expanded)
-  assert_equal(#vim.api.nvim_tabpage_list_wins(view.tab), 4, "three panes and input restored")
+  assert_equal(#vim.api.nvim_tabpage_list_wins(view.tab), 3, "two panes and input restored")
   for name, size in pairs(original) do
     local window = view.windows[name]
     assert_equal(
@@ -542,22 +619,22 @@ local function expanded_panes_test()
     })
   end
   view:render()
-  for _, expected in ipairs({
-    "+new", "-old", "first.lua", "+first change", "second.lua", "-second change",
-  }) do
-    assert(buffer_contains(view.buffers.activity, expected), "Activity displays " .. expected)
-  end
+  assert_equal(#model:activity(), 3, "file and diff events remain in the model")
   view:show_diff("+workspace change", "WORKSPACE DIFF")
   view:render()
-  assert_equal(view:status().active_pane, "activity", "manual diff focuses Activity")
-  assert(buffer_contains(view.buffers.activity, "+workspace change"), "manual diff survives render")
+  assert_equal(view:status().active_pane, "conversation", "manual diff focuses transcript pane")
+  assert(buffer_contains(view.buffers.conversation, "+workspace change"), "manual diff survives render")
   keys("we")
   keys("w2")
-  keys("w3")
+  keys("w2")
   assert(
-    buffer_contains(vim.api.nvim_get_current_buf(), "+workspace change"),
+    buffer_contains(view.buffers.conversation, "+workspace change"),
     "diff survives expanded navigation"
   )
+  keys("w1")
+  keys("gc")
+  assert(not buffer_contains(view.buffers.conversation, "+workspace change"),
+    "gc returns from diff to transcript")
   model.focused_action = function()
     return {
       id = "approval-fixture",
@@ -567,7 +644,7 @@ local function expanded_panes_test()
     }
   end
   view:render()
-  assert_equal(view:status().active_pane, "decision", "new approval interrupts expanded Activity")
+  assert_equal(view:status().active_pane, "decision", "new approval interrupts expanded transcript")
   assert_equal(vim.api.nvim_get_current_buf(), view.buffers.decision, "approval remains accessible")
   keys("we")
   assert_equal(vim.api.nvim_get_current_buf(), view.buffers.decision, "approval survives layout restoration")
@@ -576,7 +653,7 @@ local function expanded_panes_test()
   end
   view:render()
   -- A terminal resize must retain expanded mode and permit a usable restore.
-  keys("w3")
+  keys("w2")
   keys("we")
   vim.o.columns = 100
   vim.api.nvim_exec_autocmds("VimResized", {})
@@ -708,6 +785,13 @@ local function transcript_presentation_test()
   assert(not vim.treesitter.highlighter.active[plain_buffer], "ui.conversation_markdown=false leaves the parser detached")
   assert(not plain:status().markdown.active, "view status reports markdown as inactive")
   plain:teardown()
+  model.conversations["transcript-agent"][2].model = vim.NIL
+  model.agents["transcript-agent"].capabilities = { { name = "history", available = true, reason = vim.NIL } }
+  local nil_view = View.new(model, {}, { home = vim.fn.tempname() })
+  assert(nil_view:open())
+  assert(not buffer_contains(nil_view.buffers.conversation, "vim.NIL"), "JSON null does not become a speaker label")
+  assert(not buffer_contains(nil_view.buffers.agents, "vim.NIL"), "JSON null does not become a capability note")
+  nil_view:teardown()
 end
 
 local function native_presentation_test()
@@ -981,9 +1065,9 @@ local function integration_test()
       )
     end
   end
-  expand_tree("▸ /  [missing]", "workspace/")
+  expand_tree("▸ **/**", "workspace/")
   expand_tree("workspace/", "repos/")
-  expand_tree("agent-manager/  [missing]", "codex resumable fixture")
+  expand_tree("agent-manager/**", "codex resumable fixture")
   expand_tree("repos/", "alpha/")
   expand_tree("alpha/", "api/")
   expand_tree("api/", "Codex terminal session")
@@ -1125,8 +1209,8 @@ local function integration_test()
   assert_equal(#completed.model.pending_order, 0, "human requests resolved")
   assert_equal(manager.pending_approval_count(), 0, "resolved approval count")
   assert(buffer_contains(completed.view.buffers.conversation, "interactive answer"), "conversation response")
-  assert(buffer_contains(completed.view.buffers.activity, "input_tokens: 12"), "usage presentation")
-  assert(not buffer_contains(completed.view.buffers.activity, "usage.updated"), "usage event log is hidden")
+  assert(buffer_contains(completed.view.buffers.agents, "input_tokens: 12"), "usage presentation")
+  assert(not buffer_contains(completed.view.buffers.agents, "usage.updated"), "usage event log is hidden")
   assert(buffer_contains(completed.view.buffers.agents, "dirty buffer conflict"), "conflict presentation")
 
   local conflict = manager.status().model.file_conflicts[agent_id][test_file]
@@ -1152,7 +1236,7 @@ local function integration_test()
   manager.diff_ui()
   await("workspace diff", function()
     local status = manager.status()
-    return status.view.active_pane == "activity" and buffer_contains(status.view.buffers.activity, "+new")
+    return status.view.active_pane == "conversation" and buffer_contains(status.view.buffers.conversation, "+new")
   end)
 
   local history = nil
@@ -1735,6 +1819,8 @@ local function run()
   pure_client_revision_mismatch_test()
   pure_model_test()
   layout_test()
+  directory_markdown_and_bottom_test()
+  unified_workflow_layout_test()
   workspace_view_navigation_test()
   conversation_prompt_test()
   expanded_panes_test()

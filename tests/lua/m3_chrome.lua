@@ -154,13 +154,13 @@ h.finish(function()
     View._render_agents = function() error("presentation edit rebuilt domain rows") end
     local tx = h.truthy(foundation.begin_transaction())
     h.truthy(tx:stage("ux.chrome.components/navigation/padding/value", 4))
-    h.equal(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1], "    1 AGENTS · BY DIRECTORY")
+    h.truthy(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]:find("    ## 1 AGENTS", 1, true))
     h.equal(vim.api.nvim_win_get_cursor(win), cursor, "shared component edit moved selection")
     h.equal(manager.status().model.selected_agent_id, selected, "shared component edit changed agent")
     h.truthy(tx:stage("ux.chrome.component.agent.manager.navigation/navigation/padding/value", 2))
-    h.equal(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1], "  1 AGENTS · BY DIRECTORY")
+    h.truthy(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]:find("  ## 1 AGENTS", 1, true))
     h.truthy(tx:undo())
-    h.equal(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1], "    1 AGENTS · BY DIRECTORY")
+    h.truthy(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]:find("    ## 1 AGENTS", 1, true))
     h.truthy(tx:revert())
     h.truthy(tx:commit())
     View._render_agents = original_render
@@ -223,6 +223,22 @@ h.finish(function()
   h.truthy(manager.teardown())
   for name, buffer in pairs(buffers) do
     h.equal(vim.api.nvim_buf_is_valid(buffer), false, name .. " buffer survived teardown")
+  end
+  if pane_api_ok then
+    local View = require("agent_manager.view")
+    local Workflows = require("agent_manager.workflows")
+    local isolated = View.new(require("agent_manager.model").new({ max_events = 8 }), {},
+      { home = vim.fn.tempname() })
+    local workflows = Workflows.new(isolated, { python = false, refresh_ms = 60000 }, function() end)
+    isolated.workflows = workflows
+    h.truthy(isolated:open())
+    workflows:open()
+    h.equal(panes.inspect(workflows.windows.checklist).content, "markdown", "workflow directory Chrome content")
+    h.equal(panes.inspect(workflows.windows.detail).content, "markdown", "workflow transcript Chrome content")
+    h.equal(panes.inspect(isolated.windows.prompt).role, "input", "bottom prompt Chrome role")
+    h.truthy(isolated:bottom(2))
+    h.equal(panes.inspect(isolated.windows.prompt).content, "markdown", "bottom shortcuts Chrome content")
+    isolated:teardown()
   end
   h.equal(surface_options(), opening_surfaces, "teardown changed a Chrome-owned surface")
   vim.api.nvim_del_augroup_by_id(event_group)

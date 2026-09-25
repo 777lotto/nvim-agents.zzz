@@ -110,6 +110,35 @@ broker refresh or filesystem scan. Narrow layouts reattach the callback when
 their shared content window returns to navigation; hidden panes acquire current
 preferences on display. Missing component support preserves native rendering.
 
+The session directory and workflow tree use Markdown source, the bundled
+Markdown parser, and Chrome pane content `markdown`. Foundation owns the
+semantic colors. Their rendering schema is:
+
+| Property | Markdown source | Foundation color role |
+| --- | --- | --- |
+| Pane and transcript section | `## Heading` | `AgentManagerTitle` (blue) |
+| Directory, session group, workflow, phase | `**name**` | `AgentManagerTitle` for roots and groups; `AgentManagerMuted` for ordinary folders |
+| Session and task text | plain text or `*task*` | neutral body text |
+| Provider glyph | plain text | `AgentManagerProviderCodex` (blue), `AgentManagerProviderClaude` (peach) |
+| Session state glyph | plain text | `AgentManagerStatusSuccess`, `AgentManagerStatusWaiting`, or `AgentManagerMuted` |
+| User transcript line | original Markdown | `AgentManagerMessageUser` (mauve) |
+| Assistant model heading | `## model` | `AgentManagerMessageAssistant` (blue) |
+
+Folder names are escaped before insertion into Markdown. Session titles and
+provider messages remain plain text so their source text is preserved. Chrome
+owns pane options and Markdown presentation when installed; the bundled parser
+and Foundation highlights provide the native fallback. Workflow detail uses
+the same heading and user-message rules as the regular conversation.
+
+The bottom input window has prompt and shortcut views, selected with normal-mode
+`1` and `2` while it is focused. Chrome attaches each as an explicit pane. The
+directory uses `1` for sessions and `2` for workflows, preserving the same
+navigation and conversation window positions. The Activity side window is gone;
+diff inspection uses the conversation window. Directory listing reads folders
+only. A session group starts with five sessions and cycles through all, none,
+and five. Historical cwd paths remain navigable with a `[past cwd]` marker;
+starting a new session from a missing path is refused.
+
 `m3_chrome.lua` exercises this optional contract when available, including
 preview/revert, per-component overrides, preserved selection, Unicode span
 clipping, and narrow-window refocus. The existing minimum compatibility pins

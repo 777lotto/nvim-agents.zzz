@@ -1,13 +1,14 @@
 local View = {}
 View.__index = View
 
-local pane_names = { "agents", "conversation", "activity" }
+local pane_names = { "agents", "conversation" }
 
 -- The transcript is Markdown source. Registering the pane's own filetype as a
 -- Markdown dialect lets Neovim's bundled parser highlight it and lets an
 -- installed render-markdown.nvim (when its `file_types` names this filetype)
 -- draw headings, tables, and code fences without changing the buffer text.
 local conversation_filetype = "agent-manager-conversation"
+local directory_filetype = "agent-manager-agents"
 local conversation_language = "markdown"
 
 local function valid_buffer(buffer)
@@ -23,8 +24,12 @@ local function valid_tab(tab)
 end
 
 local function inline(value)
-  value = tostring(value or "")
+  value = tostring(value ~= vim.NIL and value or "")
   return value:gsub("%z", "�"):gsub("[\r\n]", " ")
+end
+
+local function markdown_text(value)
+  return inline(value):gsub("([\\`*_%[%]<>])", "\\%1")
 end
 
 local function add_phrase_highlight(highlights, line_number, line, phrase, group)
@@ -40,7 +45,7 @@ local function add_phrase_highlight(highlights, line_number, line, phrase, group
 end
 
 local function text_lines(value)
-  value = tostring(value or ""):gsub("%z", "�"):gsub("\r", "")
+  value = tostring(value ~= vim.NIL and value or ""):gsub("%z", "�"):gsub("\r", "")
   return vim.split(value, "\n", { plain = true })
 end
 
@@ -87,6 +92,7 @@ local function usage_lines(value, prefix, lines, depth)
   if depth > 4 or #lines >= 16 then
     return
   end
+  if value == vim.NIL then return end
   if type(value) ~= "table" then
     table.insert(lines, string.format(" %s: %s", prefix, inline(value)))
     return
@@ -346,10 +352,12 @@ local function set_window_options(window, wrap, pane)
   if loaded then
     local navigation = pane == "agents" or pane == "workflow_checklist"
     local role = navigation and "navigation" or pane == "prompt" and "input"
-      or (pane == "decision" or pane == "workflow_detail") and "context" or "log"
+      or (pane == "decision" or pane == "workflow_detail" or pane == "bottom_help") and "context" or "log"
     local buffer = vim.api.nvim_win_get_buf(window)
-    local content = navigation and "list"
+    local content = navigation and vim.b[buffer].agent_manager_markdown ~= false and "markdown"
       or pane == "conversation" and vim.b[buffer].agent_manager_markdown ~= false and "markdown"
+      or pane == "workflow_detail" and vim.b[buffer].agent_manager_markdown ~= false and "markdown"
+      or pane == "bottom_help" and "markdown"
       or "plaintext"
     local ok, err = pcall(chrome.attach, {
       id = "agent.manager." .. pane, role = role, content = content, window = window, buffer = buffer,
@@ -374,9 +382,6 @@ function View:style_pane(window, pane, wrap)
 end
 
 function View.layout_for(columns)
-  if columns >= 140 then
-    return { mode = "wide", visible = { "agents", "conversation", "activity" } }
-  end
   if columns >= 90 then
     return { mode = "medium", visible = { "agents", "conversation" } }
   end
@@ -403,10 +408,11 @@ function View.new(model, actions, opts)
     session_group_path_rows = {},
     directory_rows = {},
     directory_path_rows = {},
-    file_rows = {},
     directory_hints = {},
     expanded_directories = { [home] = true },
     expanded_session_groups = {},
+    session_group_limits = {},
+    bottom_view = 1,
     directory_cache = {},
     namespace = vim.api.nvim_create_namespace("AgentManagerView"),
     prompt_namespace = vim.api.nvim_create_namespace("AgentManagerPrompt"),
@@ -436,7 +442,7 @@ function View:_directory_listing(path)
   local entries = {}
   local ok, err = pcall(function()
     for name, entry_type in vim.fs.dir(path) do
-      if name ~= "." and name ~= ".." then
+      if name ~= "." and name ~= ".." and entry_type == "directory" then
         table.insert(entries, {
           name = name,
           path = join_path(path, name),
@@ -513,8 +519,8 @@ function View:_buffer(name)
     plugin_id = "agent.manager",
     pane = name,
   }
-  if name == "conversation" then
-    self:_attach_conversation_markdown(buffer)
+  if name == "conversation" or name == "agents" or name == "bottom_help" then
+    self:_attach_markdown(buffer, name == "agents" and directory_filetype or conversation_filetype, name)
   end
   if name == "prompt" then
     self:_map_prompt_buffer(buffer)
@@ -532,16 +538,20 @@ function View:_buffer(name)
   return buffer
 end
 
-function View:_attach_conversation_markdown(buffer)
-  self.markdown = { enabled = self.opts.conversation_markdown ~= false, active = false }
-  vim.b[buffer].agent_manager_markdown = self.markdown.enabled
-  if not self.markdown.enabled then
+function View:_attach_markdown(buffer, filetype, pane)
+  local enabled = self.opts.conversation_markdown ~= false
+  local state = { enabled = enabled, active = false }
+  if pane == "agents" then self.directory_markdown = state
+  elseif pane == "bottom_help" then self.bottom_markdown = state
+  else self.markdown = state end
+  vim.b[buffer].agent_manager_markdown = enabled
+  if not enabled then
     return false
   end
-  local registered = pcall(vim.treesitter.language.register, conversation_language, conversation_filetype)
+  local registered = pcall(vim.treesitter.language.register, conversation_language, filetype)
   local started = registered and pcall(vim.treesitter.start, buffer, conversation_language)
-  self.markdown.active = started == true
-  return self.markdown.active
+  state.active = started == true
+  return state.active
 end
 
 function View:_map_windows(buffer)
@@ -586,15 +596,19 @@ function View:_map_prompt_buffer(buffer)
   vim.keymap.set("n", "<S-Tab>", function()
     self:cycle(-1)
   end, opts("previous pane"))
-  for index, pane in ipairs(pane_names) do
-    local target = pane
-    vim.keymap.set("n", tostring(index), function()
-      self:focus(target)
-    end, opts("focus " .. target .. " pane"))
+  for index = 1, 2 do
+    vim.keymap.set("n", tostring(index), function() self:bottom(index) end,
+      opts(index == 1 and "show prompt" or "show shortcuts"))
   end
 end
 
 function View:_map_buffer(buffer)
+  if buffer == self.buffers.bottom_help then
+    for index = 1, 2 do
+      vim.keymap.set("n", tostring(index), function() self:bottom(index) end,
+        { buffer = buffer, silent = true, nowait = true, desc = "Agent Manager bottom view " .. index })
+    end
+  end
   for _, key in ipairs({ "gs", "gw" }) do
     vim.keymap.set("n", key, function()
       if self.actions.workflows then self.actions.workflows() end
@@ -615,15 +629,19 @@ function View:_map_buffer(buffer)
   end, map_opts("Agent Manager: previous pane"))
   for index, pane in ipairs(pane_names) do
     local target = pane
-    vim.keymap.set("n", tostring(index), function()
-      self:focus(target)
-    end, map_opts("Agent Manager: focus " .. target .. " pane"))
+    if buffer ~= self.buffers.bottom_help then
+      vim.keymap.set("n", tostring(index), function()
+        if buffer == self.buffers.agents then self:directory_view(index)
+        elseif target == "agents" then self:directory_view(1)
+        else self:focus(target) end
+      end, map_opts("Agent Manager: focus " .. target .. " pane"))
+    end
   end
   vim.keymap.set("n", "q", function()
     self:close()
   end, map_opts("Agent Manager: close workspace"))
   vim.keymap.set("n", "<CR>", function()
-    self:_activate_row()
+    if self.workspace_mode == "workflows" then self.workflows:select() else self:_activate_row() end
   end, map_opts("Agent Manager: select item"))
   map("y", function()
     local action = self:_focused_decision()
@@ -640,7 +658,8 @@ function View:_map_buffer(buffer)
 
   map("sn", function()
     if self.actions.start then
-      self.actions.start(self:_start_context())
+      local context = self:_start_context()
+      if context ~= false then self.actions.start(context) end
     end
   end, "start new session")
   map("so", function()
@@ -710,11 +729,11 @@ function View:_map_buffer(buffer)
     self:focus("agents")
   end, "go to agents")
   map("gc", function()
+    self.inspected_diff = nil
+    self:render()
     self:focus("conversation")
   end, "go to conversation")
-  map("gt", function()
-    self:focus("activity")
-  end, "go to activity")
+  map("gt", function() self:bottom(2) end, "go to shortcuts")
   map("gr", function()
     self:refresh_filesystem()
     if self.actions.refresh then
@@ -726,9 +745,11 @@ function View:_map_buffer(buffer)
   end, "show help")
 
   map("h", function()
+    if self.workspace_mode == "workflows" then return self.workflows:collapse() end
     self:_collapse_row()
   end, "collapse directory")
   map("l", function()
+    if self.workspace_mode == "workflows" then return self.workflows:select(true) end
     self:_expand_row()
   end, "expand or open item")
   map("?", function()
@@ -769,11 +790,32 @@ function View:open()
   return true
 end
 
-function View:_build_layout(initial_pane)
-  if self.workspace_mode == "workflows" and self.workflows then
-    self.workflows:layout()
-    return
+function View:directory_view(index)
+  if index == 2 then
+    if self.workspace_mode == "workflows" then self:focus("agents")
+    elseif self.actions.workflows then self.actions.workflows() end
+  elseif self.workspace_mode == "workflows" then
+    self.workflows.sessions()
+  else
+    self:focus("agents")
   end
+end
+
+function View:bottom(index)
+  local window = self.windows.prompt
+  if not valid_window(window) then return false end
+  if index == 2 then self:_render_bottom_help() end
+  self.bottom_view = index
+  local name = index == 2 and "bottom_help" or "prompt"
+  vim.api.nvim_win_set_buf(window, self:_buffer(name))
+  set_window_options(window, true, name)
+  vim.api.nvim_set_current_win(window)
+  self:_resize_prompt()
+  if index == 1 then self:_render_prompt() end
+  return true
+end
+
+function View:_build_layout(initial_pane)
   if not valid_tab(self.tab) or vim.api.nvim_get_current_tabpage() ~= self.tab then
     return
   end
@@ -814,23 +856,12 @@ function View:_build_layout(initial_pane)
     set_window_options(agents, false, "agents")
     self.windows.agents = agents
   end
-  if layout.mode == "wide" then
-    vim.api.nvim_set_current_win(main)
-    vim.cmd("botright vertical split")
-    local activity = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(activity, self:_buffer("activity"))
-    vim.api.nvim_win_set_width(activity, self.opts.activity_width or 38)
-    vim.wo[activity].winfixwidth = true
-    set_window_options(activity, true, "activity")
-    self.windows.activity = activity
-  end
-
   vim.api.nvim_set_current_win(main)
   vim.cmd("belowright split")
   local prompt = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(prompt, self:_buffer("prompt"))
+  vim.api.nvim_win_set_buf(prompt, self:_buffer(self.bottom_view == 2 and "bottom_help" or "prompt"))
   vim.wo[prompt].winfixheight = true
-  if not set_window_options(prompt, true, "prompt") then vim.wo[prompt].cursorline = false end
+  if not set_window_options(prompt, true, self.bottom_view == 2 and "bottom_help" or "prompt") then vim.wo[prompt].cursorline = false end
   self.windows.prompt = prompt
   self:_resize_prompt()
 
@@ -860,7 +891,7 @@ function View:toggle_expanded()
     self:_build_layout(pane)
     vim.cmd("stopinsert")
     self:render()
-    for _, name in ipairs({ "agents", "activity", "conversation", "prompt" }) do
+    for _, name in ipairs({ "agents", "conversation", "prompt" }) do
       local state, window = saved[name], self.windows[name]
       if state and valid_window(window) then
         pcall(vim.api.nvim_win_set_width, window, state.width)
@@ -921,17 +952,19 @@ function View:focus(pane)
   if pane == "conversation" then
     local content = self.windows.conversation
     if valid_window(content) then
-      vim.api.nvim_win_set_buf(content, self:_buffer("conversation"))
-      set_window_options(content, true, "conversation")
+      local name = self.workspace_mode == "workflows" and "detail" or "conversation"
+      vim.api.nvim_win_set_buf(content, self.workspace_mode == "workflows" and self.workflows:_buffer(name) or self:_buffer(name))
+      set_window_options(content, true, self.workspace_mode == "workflows" and "workflow_detail" or "conversation")
     end
     return self:focus_prompt()
   end
   local window = self.windows[pane]
   if valid_window(window) then
-    vim.api.nvim_win_set_buf(window, self:_buffer(pane))
-    set_window_options(window, pane ~= "agents", pane)
+    local workflow = self.workspace_mode == "workflows" and pane == "agents"
+    vim.api.nvim_win_set_buf(window, workflow and self.workflows:_buffer("checklist") or self:_buffer(pane))
+    set_window_options(window, pane ~= "agents", workflow and "workflow_checklist" or pane)
     vim.api.nvim_set_current_win(window)
-    if pane == "agents" then self:_present_agents() end
+    if pane == "agents" and self.workspace_mode ~= "workflows" then self:_present_agents() end
     return true
   end
   local content = self.windows.conversation
@@ -943,7 +976,7 @@ function View:focus(pane)
     self.windows.conversation = content
     vim.api.nvim_set_current_win(content)
     set_window_options(content, pane ~= "agents", pane)
-    if pane == "agents" then self:_present_agents() end
+    if pane == "agents" and self.workspace_mode ~= "workflows" then self:_present_agents() end
     return true
   end
   return false
@@ -963,6 +996,7 @@ function View:focus_prompt()
   if vim.api.nvim_get_current_tabpage() ~= self.tab then
     vim.api.nvim_set_current_tabpage(self.tab)
   end
+  self.bottom_view = 1
   vim.api.nvim_win_set_buf(prompt, self:_buffer("prompt"))
   if not set_window_options(prompt, true, "prompt") then vim.wo[prompt].cursorline = false end
   vim.api.nvim_set_current_win(prompt)
@@ -1000,7 +1034,7 @@ function View:_resize_prompt()
   if not valid_window(window) then
     return false
   end
-  pcall(vim.api.nvim_win_set_height, window, self:_prompt_height())
+  pcall(vim.api.nvim_win_set_height, window, self.bottom_view == 2 and 12 or self:_prompt_height())
   return true
 end
 
@@ -1010,6 +1044,10 @@ function View:_render_prompt()
     return
   end
   vim.api.nvim_buf_clear_namespace(buffer, self.prompt_namespace, 0, -1)
+  pcall(vim.api.nvim_buf_set_extmark, buffer, self.prompt_namespace, 0, 0, {
+    virt_lines = { { { "1 PROMPT  ·  2 SHORTCUTS", "AgentManagerHelpKey" } } },
+    virt_lines_above = true,
+  })
   local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
   local empty = #lines == 0 or (#lines == 1 and lines[1] == "")
   if empty then
@@ -1074,10 +1112,18 @@ function View:_start_context()
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local directory = self.directory_rows[row] or self.session_group_rows[row]
   if directory then
+    if directory.exists == false then
+      vim.notify("Agent Manager: this historical directory no longer exists; choose a live directory to start", vim.log.levels.WARN)
+      return false
+    end
     return vim.deepcopy(directory)
   end
   local session = self.session_rows[row]
   if session then
+    if not vim.uv.fs_stat(session.cwd) then
+      vim.notify("Agent Manager: this session's former directory is unavailable; choose a live directory to start", vim.log.levels.WARN)
+      return false
+    end
     return {
       cwd = session.cwd,
       provider = session.provider,
@@ -1103,9 +1149,6 @@ function View:_focused_target()
   end
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local target = self.session_rows[row] or self.directory_rows[row] or self.session_group_rows[row]
-  if not target and self.file_rows[row] then
-    target = { cwd = vim.fs.dirname(self.file_rows[row].path) }
-  end
   return vim.deepcopy(target)
 end
 
@@ -1125,10 +1168,16 @@ function View:_toggle_session_group(group, expanded)
   if not group or type(group.cwd) ~= "string" then
     return false
   end
-  if expanded == nil then
-    expanded = self.expanded_session_groups[group.cwd] == false
+  local current = self.session_group_limits[group.cwd]
+  if current == nil then current = 5 end
+  if expanded == true then
+    self.session_group_limits[group.cwd] = math.huge
+  elseif expanded == false then
+    self.session_group_limits[group.cwd] = 0
+  else
+    self.session_group_limits[group.cwd] = current == 5 and (group.count and group.count <= 5 and 0 or math.huge)
+      or current == math.huge and 0 or 5
   end
-  self.expanded_session_groups[group.cwd] = expanded
   self:schedule_render()
   return true
 end
@@ -1155,7 +1204,7 @@ function View:_collapse_row()
   end
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local group = self.session_group_rows[row]
-  if group and self.expanded_session_groups[group.cwd] ~= false then
+  if group and self.session_group_limits[group.cwd] ~= 0 then
     return self:_toggle_session_group(group, false)
   end
   local directory = self.directory_rows[row]
@@ -1178,8 +1227,7 @@ function View:_collapse_row()
   end
   local target_path = directory and directory.cwd
   if not target_path then
-    local file = self.file_rows[row]
-    target_path = session and session.cwd or file and vim.fs.dirname(file.path)
+    target_path = session and session.cwd
   end
   if not target_path then
     return false
@@ -1197,19 +1245,6 @@ function View:_collapse_row()
     parent = normalized_path(vim.fs.dirname(parent))
   end
   return false
-end
-
-function View:_open_file(file)
-  if not file or type(file.path) ~= "string" then
-    return false
-  end
-  local window = self.windows.conversation
-  if not valid_window(window) then
-    return false
-  end
-  vim.api.nvim_set_current_win(window)
-  vim.cmd("edit " .. vim.fn.fnameescape(file.path))
-  return true
 end
 
 function View:_activate_row()
@@ -1233,11 +1268,6 @@ function View:_activate_row()
   local directory = self.directory_rows[row]
   if directory then
     self:_toggle_directory(directory)
-    return
-  end
-  local file = self.file_rows[row]
-  if file then
-    self:_open_file(file)
     return
   end
   local session = self.session_rows[row]
@@ -1283,7 +1313,7 @@ function View:render()
   end
   self:_render_agents()
   self:_render_conversation()
-  self:_render_activity()
+  self:_render_bottom_help()
   self:_render_prompt()
   self:_resize_prompt()
   local action = self.model:focused_action()
@@ -1382,7 +1412,7 @@ function View:_render_agents()
   local primary_state_legend = "       ● active · ○ resume"
   local secondary_state_legend = "       ? check · × ended"
   local lines = {
-    " 1 AGENTS · BY DIRECTORY",
+    "## 1 AGENTS · BY DIRECTORY  ·  2 WORKFLOWS",
     string.format(" broker: %s · sessions: %d", inline(self.model.client_state), #sessions),
     provider_legend,
     primary_state_legend,
@@ -1405,7 +1435,6 @@ function View:_render_agents()
   self.session_group_path_rows = {}
   self.directory_rows = {}
   self.directory_path_rows = {}
-  self.file_rows = {}
   local repositories = self.model:workspace_list()
 
   local function directory_suffix(node, exists)
@@ -1415,7 +1444,9 @@ function View:_render_agents()
     if node.directory_hint then
       return "  [cwd]"
     end
-    return exists == false and "  [missing]" or ""
+    -- Historical sessions keep their original cwd even after a worktree is
+    -- removed or renamed. Keep the branch visible without implying it exists.
+    return exists == false and "  [past cwd]" or ""
   end
 
   local function add_directory_row(node, exists)
@@ -1468,13 +1499,17 @@ function View:_render_agents()
     if #sessions_in_group == 0 then
       return
     end
-    local expanded = self.expanded_session_groups[node.path] ~= false
+    local limit = self.session_group_limits[node.path]
+    if limit == nil then limit = 5 end
+    local expanded = limit > 0
     local icon = expanded and "▾ " or "▸ "
     table.insert(
       lines,
-      string.format("%s%s%sSessions (%d)", prefix, connector, icon, #sessions_in_group)
+      string.format("%s%s%s**Sessions** (%d%s)", prefix, connector, icon,
+        #sessions_in_group, limit == 5 and #sessions_in_group > 5 and " · first 5" or "")
     )
-    self.session_group_rows[#lines] = { cwd = node.path, repository = node.repository }
+    self.session_group_rows[#lines] = { cwd = node.path, repository = node.repository,
+      count = #sessions_in_group }
     self.session_group_path_rows[node.path] = #lines
     table.insert(highlights, { line = #lines, group = "AgentManagerTitle" })
     if not expanded then
@@ -1482,7 +1517,8 @@ function View:_render_agents()
     end
     local child_prefix = prefix .. (continues and "│  " or "   ")
     for index, session in ipairs(sessions_in_group) do
-      add_session_row(session, child_prefix, index == #sessions_in_group and "└─ " or "├─ ")
+      if index > limit then break end
+      add_session_row(session, child_prefix, index == math.min(#sessions_in_group, limit) and "└─ " or "├─ ")
     end
   end
 
@@ -1493,7 +1529,6 @@ function View:_render_agents()
       entries, read_error = self:_directory_listing(node.path)
     end
     local directories = {}
-    local files = {}
     for _, entry in ipairs(entries) do
       if entry.type == "directory" then
         directories[entry.name] = {
@@ -1501,8 +1536,6 @@ function View:_render_agents()
           node = node.directories[entry.name] or overlay_node(entry.path),
           exists = true,
         }
-      else
-        table.insert(files, entry)
       end
     end
     if filesystem_expanded then
@@ -1516,9 +1549,6 @@ function View:_render_agents()
     end
     for _, name in ipairs(sorted_directory_names(directories)) do
       table.insert(items, vim.tbl_extend("force", { kind = "directory" }, directories[name]))
-    end
-    for _, file in ipairs(files) do
-      table.insert(items, { kind = "file", file = file })
     end
     if read_error then
       table.insert(items, { kind = "error" })
@@ -1537,8 +1567,9 @@ function View:_render_agents()
           prefix
             .. connector
             .. icon
-            .. inline(item.name)
+            .. "**" .. markdown_text(item.name)
             .. "/"
+            .. "**"
             .. directory_suffix(item.node, item.exists)
         )
         add_directory_row(item.node, item.exists)
@@ -1552,11 +1583,6 @@ function View:_render_agents()
           item.exists,
           expanded
         )
-      elseif item.kind == "file" then
-        local suffix = item.file.type == "link" and "@" or ""
-        table.insert(lines, prefix .. connector .. "  " .. inline(item.file.name) .. suffix)
-        self.file_rows[#lines] = vim.deepcopy(item.file)
-        table.insert(highlights, { line = #lines, group = "AgentManagerMuted" })
       else
         table.insert(lines, prefix .. connector .. "  [directory unreadable]")
         table.insert(highlights, { line = #lines, group = "AgentManagerStatusFailure" })
@@ -1575,7 +1601,7 @@ function View:_render_agents()
     lines,
     " "
       .. (home_expanded and "▾ " or "▸ ")
-      .. inline(home_label)
+      .. "**" .. markdown_text(home_label) .. "**"
       .. directory_suffix(home_root, true)
   )
   add_directory_row(home_root, true)
@@ -1604,16 +1630,17 @@ function View:_render_agents()
         add_session_group(node, prefix, connector, not last)
       elseif item.kind == "directory" then
         local expanded = self.expanded_directories[item.node.path] == true
+        local stat = vim.uv.fs_stat(item.node.path)
+        local exists = stat and stat.type == "directory"
         table.insert(
           lines,
           prefix
             .. connector
             .. (expanded and "▾ " or "▸ ")
-            .. inline(item.name)
-            .. "/"
-            .. directory_suffix(item.node, false)
+            .. "**" .. markdown_text(item.name) .. "/**"
+            .. directory_suffix(item.node, exists)
         )
-        add_directory_row(item.node, false)
+        add_directory_row(item.node, exists)
         table.insert(highlights, { line = #lines, group = "AgentManagerMuted" })
         render_virtual_node(item.node, prefix .. (last and "   " or "│  "), expanded)
       end
@@ -1624,11 +1651,13 @@ function View:_render_agents()
     local root = outside[root_name]
     table.insert(lines, "")
     local expanded = self.expanded_directories[root.path] == true
+    local root_stat = vim.uv.fs_stat(root.path)
+    local exists = root_stat and root_stat.type == "directory"
     table.insert(
       lines,
-      " " .. (expanded and "▾ " or "▸ ") .. inline(root_name) .. directory_suffix(root, false)
+      " " .. (expanded and "▾ " or "▸ ") .. "**" .. markdown_text(root_name) .. "**" .. directory_suffix(root, exists)
     )
-    add_directory_row(root, false)
+    add_directory_row(root, exists)
     table.insert(highlights, { line = #lines, group = "AgentManagerTitle" })
     render_virtual_node(root, " ", expanded)
   end
@@ -1680,6 +1709,15 @@ function View:_render_agents()
       table.insert(lines, " ! " .. tostring(#conflicts) .. " dirty buffer conflict(s)")
       table.insert(highlights, { line = #lines, group = "AgentManagerStatusFailure" })
     end
+    local usage = self.model:usage_for()
+    if next(usage) then
+      table.insert(lines, "")
+      table.insert(lines, " ## USAGE")
+      table.insert(highlights, { line = #lines, group = "AgentManagerTitle" })
+      local usage_details = {}
+      usage_lines(usage, "", usage_details, 0)
+      vim.list_extend(lines, usage_details)
+    end
     table.insert(lines, "")
     table.insert(lines, " CAPABILITIES")
     table.insert(highlights, { line = #lines, group = "AgentManagerTitle" })
@@ -1690,7 +1728,7 @@ function View:_render_agents()
         line = #lines,
         group = capability.available and "AgentManagerStatusSuccess" or "AgentManagerMuted",
       })
-      if capability.reason and capability.reason ~= "" then
+      if capability.reason and capability.reason ~= vim.NIL and capability.reason ~= "" then
         table.insert(lines, "   " .. inline(capability.reason))
         table.insert(highlights, { line = #lines, group = "AgentManagerMuted" })
       end
@@ -1701,6 +1739,13 @@ function View:_render_agents()
 end
 
 function View:_render_conversation()
+  if self.inspected_diff then
+    if self.inspected_diff.agent_id == self.model.selected_agent_id then
+      self:_set_lines("conversation", self.inspected_diff.lines, self.inspected_diff.highlights)
+      return
+    end
+    self.inspected_diff = nil
+  end
   local agent = self.draft and nil or self.model:selected_agent()
   local subject = agent or self.draft
   local options = subject and subject.provider_options or {}
@@ -1708,8 +1753,8 @@ function View:_render_conversation()
     options = self.actions.provider_options(agent) or options
   end
   local provider = subject and (subject.provider == "claude" and "Claude" or "Codex") or nil
-  local model = inline(options and options.model or "default")
-  local effort = inline(options and options.effort or "default")
+  local model = inline(options and options.model ~= vim.NIL and options.model or "default")
+  local effort = inline(options and options.effort ~= vim.NIL and options.effort or "default")
   local provider_label = provider and string.format("%s — %s / %s", provider, model, effort) or nil
   local title = "no session configured"
   if agent then
@@ -1736,7 +1781,9 @@ function View:_render_conversation()
   for _, message in ipairs(messages) do
     if message.role ~= "user" then
       local active_options = agent and agent.provider_options or {}
-      local label = message.model or active_options.model or (provider or "Agent") .. " (default model)"
+      local label = (message.model ~= vim.NIL and message.model)
+        or (active_options.model ~= vim.NIL and active_options.model)
+        or (provider or "Agent") .. " (default model)"
       if message.role == "system" then
         label = "SYSTEM"
       end
@@ -1764,77 +1811,6 @@ function View:_render_conversation()
     table.insert(lines, "")
   end
   self:_set_lines("conversation", lines, highlights)
-end
-
-function View:_render_activity()
-  local lines = { " 3 ACTIVITY", "" }
-  local highlights = { { line = 1, group = "AgentManagerTitle" } }
-  local activity = self.model:activity()
-  local usage = self.model:usage_for()
-  if next(usage) then
-    table.insert(lines, " USAGE")
-    table.insert(highlights, { line = #lines, group = "AgentManagerTitle" })
-    local projected = {}
-    usage_lines(usage, "", projected, 0)
-    vim.list_extend(lines, projected)
-    table.insert(lines, "")
-  end
-  if self.inspected_diff then
-    if self.inspected_diff.agent_id ~= self.model.selected_agent_id then
-      self.inspected_diff = nil
-    else
-      local offset = #lines
-      vim.list_extend(lines, self.inspected_diff.lines)
-      for _, highlight in ipairs(self.inspected_diff.highlights) do
-        table.insert(highlights, { line = offset + highlight.line, group = highlight.group })
-      end
-      table.insert(lines, "")
-    end
-  end
-  if #activity == 0 then
-    table.insert(lines, " Tool and provider activity appears here.")
-    table.insert(highlights, { line = #lines, group = "AgentManagerMuted" })
-  end
-  for _, entry in ipairs(activity) do
-    table.insert(lines, string.format(" %04d  %s", entry.sequence or 0, inline(entry.type)))
-    table.insert(highlights, { line = #lines, group = "AgentManagerTool" })
-    if entry.detail and entry.detail ~= "" then
-      for _, line in ipairs(text_lines(entry.detail)) do
-        table.insert(lines, "       " .. line)
-      end
-    end
-    local payload = entry.payload or {}
-    if entry.type:match("^file%.") or entry.type:match("^diff%.") then
-      local function append_diff(diff)
-        if type(diff) ~= "string" then
-          return
-        end
-        for _, line in ipairs(text_lines(diff)) do
-          table.insert(lines, line)
-          local group = line:sub(1, 1) == "+" and line:sub(1, 3) ~= "+++" and "AgentManagerDiffAdd"
-            or line:sub(1, 1) == "-" and line:sub(1, 3) ~= "---" and "AgentManagerDiffDelete"
-            or line:sub(1, 2) == "@@" and "AgentManagerDiffChange"
-          if group then
-            table.insert(highlights, { line = #lines, group = group })
-          end
-        end
-      end
-      append_diff(payload.diff)
-      local item = type(payload.item) == "table" and payload.item or {}
-      local changes = payload.changes or item.changes
-      if type(changes) == "table" then
-        for _, change in ipairs(changes) do
-          if type(change) == "table" then
-            table.insert(lines, "       " .. inline(change.path))
-            append_diff(change.diff)
-          end
-        end
-      elseif payload.path then
-        table.insert(lines, "       " .. inline(payload.path))
-      end
-    end
-  end
-  self:_set_lines("activity", lines, highlights)
 end
 
 function View:_render_decision(action)
@@ -1992,18 +1968,18 @@ function View:show_diff(diff, title)
       end
     end
   end
+  self:focus("conversation")
   self.inspected_diff = {
     lines = lines,
     highlights = highlights,
     agent_id = self.model.selected_agent_id,
   }
-  self:_render_activity()
-  self:focus("activity")
+  self:_set_lines("conversation", lines, highlights)
 end
 
-function View:show_help()
+function View:_render_bottom_help()
   local lines = {
-    " HELP",
+    "## 1 Prompt  ·  2 Shortcuts",
     "",
     " SESSION",
     " sn      start a new session in focused directory",
@@ -2026,16 +2002,17 @@ function View:show_help()
     " ds      permanently delete focused provider session",
     "",
     " GO",
-    " ga/gc/gt focus agents / conversation / activity",
+    " ga/gc/gt focus directory / conversation (return from diff) / shortcuts",
     " gr      refresh filesystem, agents, and CLI sessions",
     "",
     " y / n   yes / allow or no / deny focused request",
-    " 1 / 2 / 3 focus agents / conversation / activity",
+    " directory: 1 sessions / 2 workflows",
+    " bottom: 1 prompt / 2 shortcuts",
     " <Tab>   cycle panes",
     " we      toggle expanded pane",
-    " w1/w2/w3 focus Agents / Conversation / Activity (also while expanded)",
+    " w1/w2 focus Directory / Conversation (also while expanded)",
     " prompt: <CR> send · <C-j> newline",
-    " <CR>    expand directory, open file/session, or answer question",
+    " <CR>    expand directory, open session, or answer question",
     " h / l   collapse / expand directory",
     " q       close workspace",
   }
@@ -2043,8 +2020,12 @@ function View:show_help()
   for line = 3, #lines do
     table.insert(highlights, { line = line, group = "AgentManagerHelpDescription" })
   end
-  self:_set_lines("activity", lines, highlights)
-  self:focus("activity")
+  self:_set_lines("bottom_help", lines, highlights)
+end
+
+function View:show_help()
+  self:_render_bottom_help()
+  self:bottom(2)
 end
 
 function View:close()
@@ -2087,6 +2068,7 @@ function View:status()
     buffers = vim.deepcopy(self.buffers),
     windows = vim.deepcopy(self.windows),
     markdown = vim.deepcopy(self.markdown or { enabled = self.opts.conversation_markdown ~= false, active = false }),
+    directory_markdown = vim.deepcopy(self.directory_markdown or { enabled = self.opts.conversation_markdown ~= false, active = false }),
     backend = "native",
   }
 end
