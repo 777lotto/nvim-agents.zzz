@@ -70,11 +70,11 @@ class ExecutionRequest(BaseModel):
 # provider's own window name (Claude) or window length in minutes (Codex).
 # Anything else stays an ordinary redacted failure.
 QUOTA_WINDOWS: dict[str, int] = {"five_hour": 18000, "seven_day": 604800}
-CODEX_WINDOW_MINUTES: dict[int, int] = {300: 18000, 10080: 604800}
+FIVE_HOUR = QUOTA_WINDOWS["five_hour"]
+CODEX_WINDOW_MINUTES: dict[int, int] = {300: FIVE_HOUR, 10080: QUOTA_WINDOWS["seven_day"]}
 # Codex reports plan exhaustion, five-hour or weekly, as `usageLimitExceeded`.
 # `rateLimitExceeded` is accepted only with a snapshot naming the window.
 CODEX_LIMIT_ERRORS = frozenset({"usageLimitExceeded", "rateLimitExceeded"})
-FIVE_HOUR = 18000
 
 
 class SessionLimit(RuntimeError):
@@ -109,35 +109,29 @@ def valid_reset(value: Any, window_seconds: int = FIVE_HOUR) -> bool:
 
 
 def codex_bucket(response: GetAccountRateLimitsResponse) -> RateLimitSnapshot | None:
-    # Once the plan is exhausted the single-bucket view can switch to the
-    # credits bucket; the metered `codex` bucket still carries the window.
-    snapshot = response.rate_limits
-    if snapshot.limit_id in {None, "codex"}:
-        return snapshot
+    # The metered `codex` bucket carries the plan windows even after the
+    # single-bucket view has switched to the credits bucket on exhaustion.
     raw = (response.rate_limits_by_limit_id or {}).get("codex")
-    if not isinstance(raw, dict):
-        return None
-    try:
-        return RateLimitSnapshot.model_validate(raw)
-    except ValueError:
-        return None
+    if isinstance(raw, dict):
+        with contextlib.suppress(ValueError):
+            return RateLimitSnapshot.model_validate(raw)
+    snapshot = response.rate_limits
+    return snapshot if snapshot.limit_id in {None, "codex"} else None
 
 
 def exhausted_window(snapshot: RateLimitSnapshot) -> tuple[int, int] | None:
-    # The latest reset among exhausted windows. An unknown window length, an
-    # out-of-range reset or a spend control makes the snapshot unusable.
-    if snapshot.spend_control_reached:
-        return None
+    # The latest reset among exhausted windows of a known length whose reset
+    # lies inside that window; other windows carry no usable evidence.
     exhausted: list[tuple[int, int]] = []
     for window in (snapshot.primary, snapshot.secondary):
         if window is None or window.used_percent < 100:
             continue
         minutes = window.window_duration_mins
         if minutes is None or minutes not in CODEX_WINDOW_MINUTES:
-            return None
+            continue
         seconds = CODEX_WINDOW_MINUTES[minutes]
         if not valid_reset(window.resets_at, seconds):
-            return None
+            continue
         assert window.resets_at is not None
         exhausted.append((window.resets_at, seconds))
     return max(exhausted) if exhausted else None
@@ -147,14 +141,13 @@ async def codex_session_limit(codex: AsyncCodex, error: Any) -> SessionLimit | N
     # A terminal typed limit error is required. A fresh account snapshot names
     # the exhausted window and its reset; this account meters only a weekly
     # window, so five-hour and weekly windows are both recognised. Bare 429s,
-    # message text and unrelated buckets are insufficient. When Codex has
-    # given its typed usage-limit verdict but no snapshot is readable, the
-    # five-hour window is reported as a floor so the queue re-probes instead
-    # of blocking the task on a generic failure.
-    if not isinstance(error, dict):
-        return None
-    code = cast(dict[str, Any], error).get("codexErrorInfo")
-    if code not in CODEX_LIMIT_ERRORS:
+    # message text and unrelated buckets are insufficient. Codex's typed
+    # usage-limit verdict is authoritative for exhaustion itself: when no
+    # snapshot names the window, the five-hour window is reported as a floor
+    # so the queue re-probes instead of blocking the task on a generic
+    # failure. A spend control is not a timed window and never cools down.
+    code = cast(dict[str, Any], error).get("codexErrorInfo") if isinstance(error, dict) else None
+    if not isinstance(code, str) or code not in CODEX_LIMIT_ERRORS:
         return None
     floor = (
         SessionLimit("codex", int(time.time()) + FIVE_HOUR)
@@ -170,11 +163,11 @@ async def codex_session_limit(codex: AsyncCodex, error: Any) -> SessionLimit | N
     except Exception:
         return floor
     snapshot = codex_bucket(response)
-    if snapshot is None:
-        return floor
-    window = exhausted_window(snapshot)
-    if window is None:
+    if snapshot is not None and snapshot.spend_control_reached:
         return None
+    window = exhausted_window(snapshot) if snapshot is not None else None
+    if window is None:
+        return floor
     resets_at, seconds = window
     return SessionLimit("codex", resets_at, seconds)
 

@@ -273,40 +273,40 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_claude_window_rejection_is_sanitized(self) -> None:
         for kind, reset, window in (("five_hour", 2000, 18000), ("seven_day", 605800, 604800)):
+            with self.subTest(kind=kind):
 
-            async def stream(kind: Any = kind, reset: Any = reset) -> AsyncIterator[Any]:
-                yield RateLimitEvent(
-                    rate_limit_info=RateLimitInfo(
-                        status="rejected",
-                        rate_limit_type=kind,
-                        resets_at=reset,
-                        raw={"private": "secret provider payload"},
-                    ),
-                    uuid="event",
-                    session_id="session",
+                async def stream(kind: Any = kind, reset: Any = reset) -> AsyncIterator[Any]:
+                    yield RateLimitEvent(
+                        rate_limit_info=RateLimitInfo(
+                            status="rejected",
+                            rate_limit_type=kind,
+                            resets_at=reset,
+                            raw={"private": "secret provider payload"},
+                        ),
+                        uuid="event",
+                        session_id="session",
+                    )
+
+                client = AsyncMock()
+                client.__aenter__.return_value = client
+                client.receive_response = stream
+                with (
+                    patch.object(execution, "ClaudeSDKClient", return_value=client),
+                    patch.object(execution.time, "time", return_value=1000),
+                    self.assertRaises(execution.SessionLimit) as raised,
+                ):
+                    await execution.execute(self.request("claude"), lambda event: None)
+                frame = raised.exception.frame()
+                self.assertEqual(
+                    frame["quota"],
+                    {
+                        "provider": "claude",
+                        "window_seconds": window,
+                        "resets_at": reset,
+                    },
                 )
-
-            client = AsyncMock()
-            client.__aenter__.return_value = client
-            client.receive_response = stream
-            with (
-                self.subTest(kind=kind),
-                patch.object(execution, "ClaudeSDKClient", return_value=client),
-                patch.object(execution.time, "time", return_value=1000),
-                self.assertRaises(execution.SessionLimit) as raised,
-            ):
-                await execution.execute(self.request("claude"), lambda event: None)
-            frame = raised.exception.frame()
-            self.assertEqual(
-                frame["quota"],
-                {
-                    "provider": "claude",
-                    "window_seconds": window,
-                    "resets_at": reset,
-                },
-            )
-            self.assertNotIn("secret", json.dumps(frame))
-            client.interrupt.assert_awaited_once()
+                self.assertNotIn("secret", json.dumps(frame))
+                client.interrupt.assert_awaited_once()
 
     async def test_claude_non_session_limits_do_not_switch(self) -> None:
         cases: list[tuple[Any, Any, Any]] = [
@@ -366,7 +366,12 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         client = AsyncMock()
         client._client.request.return_value = self.rate_limits(snapshot)
         with patch.object(execution.time, "time", return_value=1000):
-            for error in ({"code": 429}, {"codexErrorInfo": "serverOverloaded"}, None):
+            for error in (
+                {"code": 429},
+                {"codexErrorInfo": "serverOverloaded"},
+                {"codexErrorInfo": {"httpConnectionFailed": {"httpStatusCode": 502}}},
+                None,
+            ):
                 self.assertIsNone(await execution.codex_session_limit(client, error))
             client._client.request.assert_not_called()
             for code in ("rateLimitExceeded", "usageLimitExceeded"):
@@ -374,10 +379,15 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(limit, execution.SessionLimit)
                 assert limit is not None
                 self.assertEqual((limit.resets_at, limit.window_seconds), (2000, 18000))
+            unusable = {"usedPercent": 100, "windowDurationMins": 60, "resetsAt": 1500}
             for change, expected in (
                 ({"primary": weekly}, (500000, 604800)),
                 ({"secondary": weekly}, (500000, 604800)),
                 ({"secondary": {**weekly, "resetsAt": 1500}}, (2000, 18000)),
+                # A window of unknown length or with an out-of-range reset is
+                # skipped; the remaining confirmed window still counts.
+                ({"secondary": unusable}, (2000, 18000)),
+                ({"secondary": {**weekly, "resetsAt": 605861}}, (2000, 18000)),
             ):
                 client._client.request.return_value = self.rate_limits({**snapshot, **change})
                 with self.subTest(change=change):
@@ -386,26 +396,42 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                     )
                     assert limit is not None
                     self.assertEqual((limit.resets_at, limit.window_seconds), expected)
+            # Without a confirmed window, a bare rate-limit error is an ordinary
+            # failure while Codex's usage-limit verdict yields the floor.
             for change in (
                 {"primary": {"usedPercent": 99, "windowDurationMins": 300, "resetsAt": 2000}},
-                {"primary": {"usedPercent": 100, "windowDurationMins": 60, "resetsAt": 2000}},
+                {"primary": unusable},
                 {"primary": {"usedPercent": 100, "windowDurationMins": 300, "resetsAt": None}},
                 {"primary": {"usedPercent": 100, "windowDurationMins": 300, "resetsAt": 999}},
                 {"primary": {"usedPercent": 100, "windowDurationMins": 300, "resetsAt": 19061}},
                 {"primary": {**weekly, "resetsAt": 605861}},
-                {"spendControlReached": True},
+                {"primary": None},
             ):
                 client._client.request.return_value = self.rate_limits({**snapshot, **change})
-                for code in ("rateLimitExceeded", "usageLimitExceeded"):
-                    with self.subTest(change=change, code=code):
-                        self.assertIsNone(
-                            await execution.codex_session_limit(client, {"codexErrorInfo": code})
+                with self.subTest(change=change):
+                    self.assertIsNone(
+                        await execution.codex_session_limit(
+                            client, {"codexErrorInfo": "rateLimitExceeded"}
                         )
+                    )
+                    limit = await execution.codex_session_limit(
+                        client, {"codexErrorInfo": "usageLimitExceeded"}
+                    )
+                    assert limit is not None
+                    self.assertEqual((limit.resets_at, limit.window_seconds), (19000, 18000))
+            # A spend control is not a timed window: never a cooldown.
+            client._client.request.return_value = self.rate_limits(
+                {**snapshot, "spendControlReached": True}
+            )
+            for code in ("rateLimitExceeded", "usageLimitExceeded"):
+                self.assertIsNone(
+                    await execution.codex_session_limit(client, {"codexErrorInfo": code})
+                )
 
     async def test_codex_metered_bucket_and_floor_after_usage_limit(self) -> None:
         # After exhaustion the single-bucket view shows the credits bucket; the
-        # metered bucket keeps the weekly window and its real reset.
-        credit_view = {"limitId": "premium", "credits": {"hasCredits": False, "unlimited": False}}
+        # metered bucket keeps the weekly window and its real reset, and is
+        # preferred even when the single-bucket view carries no limit id.
         metered = {
             "codex": {
                 "limitId": "codex",
@@ -414,19 +440,29 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         }
         client = AsyncMock()
         with patch.object(execution.time, "time", return_value=1000):
-            client._client.request.return_value = self.rate_limits(credit_view, metered)
-            limit = await execution.codex_session_limit(
-                client, {"codexErrorInfo": "usageLimitExceeded"}
-            )
-            assert limit is not None
-            self.assertEqual((limit.resets_at, limit.window_seconds), (500000, 604800))
+            for view in (
+                {"limitId": "premium", "credits": {"hasCredits": False, "unlimited": False}},
+                {"credits": {"hasCredits": False, "unlimited": False}},
+            ):
+                client._client.request.return_value = self.rate_limits(view, metered)
+                with self.subTest(view=view):
+                    limit = await execution.codex_session_limit(
+                        client, {"codexErrorInfo": "usageLimitExceeded"}
+                    )
+                    assert limit is not None
+                    self.assertEqual((limit.resets_at, limit.window_seconds), (500000, 604800))
             # Without any readable metered window, Codex's typed usage-limit
             # verdict still parks the provider for the five-hour floor; a bare
             # rate-limit error without a snapshot stays an ordinary failure.
+            credit_view = {
+                "limitId": "premium",
+                "credits": {"hasCredits": False, "unlimited": False},
+            }
             for response in (
                 self.rate_limits(credit_view, {}),
                 self.rate_limits(credit_view, None),
                 self.rate_limits(credit_view, {"codex": "opaque"}),
+                self.rate_limits({**credit_view, "limitId": None}, {"codex": {"primary": 1}}),
             ):
                 client._client.request.return_value = response
                 limit = await execution.codex_session_limit(
