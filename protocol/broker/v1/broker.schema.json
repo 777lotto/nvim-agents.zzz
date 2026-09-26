@@ -469,6 +469,69 @@
         "after_sequence": { "type": "integer", "minimum": 0 }
       }
     },
+    "transcriptStyle": {
+      "description": "Semantic presentation style of a transcript span. The editor maps each style to a highlight group; text is never rewritten or concealed.",
+      "enum": [
+        "label_assistant",
+        "label_system",
+        "message_user",
+        "streaming",
+        "heading",
+        "code_fence",
+        "code",
+        "code_span",
+        "strong",
+        "emphasis",
+        "list_marker",
+        "quote",
+        "link",
+        "rule",
+        "table_border"
+      ]
+    },
+    "transcriptSpan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "style"],
+      "properties": {
+        "start": { "type": "integer", "minimum": 0, "description": "Byte offset of the first styled byte." },
+        "end": { "type": "integer", "minimum": 1, "description": "Byte offset one past the last styled byte." },
+        "style": { "$ref": "#/$defs/transcriptStyle" }
+      }
+    },
+    "transcriptLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "spans"],
+      "properties": {
+        "text": { "type": "string", "maxLength": 65536, "description": "Verbatim presentation text without a line terminator." },
+        "spans": { "type": "array", "maxItems": 1024, "items": { "$ref": "#/$defs/transcriptSpan" } }
+      }
+    },
+    "transcriptSnapshot": {
+      "description": "Result of agent/transcript: the complete broker-owned transcript presentation at one revision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "revision", "lines"],
+      "properties": {
+        "agent_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "lines": { "type": "array", "items": { "$ref": "#/$defs/transcriptLine" } }
+      }
+    },
+    "transcriptPatch": {
+      "description": "Replace lines [start, end) of revision - 1 with lines. A client whose applied revision is not revision - 1 must request agent/transcript instead of applying the patch.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "revision", "start", "end", "lines"],
+      "properties": {
+        "agent_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "revision": { "type": "integer", "minimum": 1 },
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 },
+        "lines": { "type": "array", "items": { "$ref": "#/$defs/transcriptLine" } }
+      }
+    },
     "request": {
       "type": "object",
       "additionalProperties": false,
@@ -500,6 +563,7 @@
             "agent/context/add",
             "agent/diff",
             "agent/replay",
+            "agent/transcript",
             "broker/shutdown"
           ]
         },
@@ -521,7 +585,8 @@
         { "if": { "properties": { "method": { "const": "agent/approval/respond" } } }, "then": { "properties": { "params": { "$ref": "#/$defs/approvalResponseParams" } } } },
         { "if": { "properties": { "method": { "const": "agent/question/respond" } } }, "then": { "properties": { "params": { "$ref": "#/$defs/questionResponseParams" } } } },
         { "if": { "properties": { "method": { "const": "agent/context/add" } } }, "then": { "properties": { "params": { "$ref": "#/$defs/contextParams" } } } },
-        { "if": { "properties": { "method": { "const": "agent/replay" } } }, "then": { "properties": { "params": { "$ref": "#/$defs/replayParams" } } } }
+        { "if": { "properties": { "method": { "const": "agent/replay" } } }, "then": { "properties": { "params": { "$ref": "#/$defs/replayParams" } } } },
+        { "if": { "properties": { "method": { "const": "agent/transcript" } } }, "then": { "properties": { "params": { "$ref": "#/$defs/agentIdParams" } } } }
       ]
     },
     "response": {
@@ -559,6 +624,16 @@
             "jsonrpc": { "const": "2.0" },
             "method": { "const": "agent/event" },
             "params": { "$ref": "#/$defs/eventEnvelope" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["jsonrpc", "method", "params"],
+          "properties": {
+            "jsonrpc": { "const": "2.0" },
+            "method": { "const": "agent/transcript/patch" },
+            "params": { "$ref": "#/$defs/transcriptPatch" }
           }
         },
         {

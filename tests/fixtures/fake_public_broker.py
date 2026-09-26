@@ -88,6 +88,124 @@ def agent(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+class Transcript:
+    """Mirror of the broker-owned transcript projection for one agent."""
+
+    def __init__(self, broker: Broker, agent_id: str) -> None:
+        self.broker = broker
+        self.agent_id = agent_id
+        self.messages: list[dict[str, Any]] = []
+        self.lines: list[dict[str, Any]] = []
+        self.revision = 0
+
+    @staticmethod
+    def _styled(text: str, style: str) -> dict[str, Any]:
+        spans = [{"start": 0, "end": len(text.encode()), "style": style}] if text else []
+        return {"text": text, "spans": spans}
+
+    def render(self) -> list[dict[str, Any]]:
+        lines: list[dict[str, Any]] = []
+        for message in self.messages:
+            if message["role"] == "user":
+                lines.extend(self._styled(t, "message_user") for t in message["text"].split("\n"))
+            else:
+                lines.append(self._styled(message["label"], "label_assistant"))
+                lines.append({"text": "", "spans": []})
+                if not (message["streaming"] and not message["text"]):
+                    for text in message["text"].split("\n"):
+                        style = "heading" if text.startswith("## ") else None
+                        lines.append(self._styled(text, style) if style else {"text": text, "spans": []})
+                if message["streaming"]:
+                    lines.append(self._styled("\u2026", "streaming"))
+            lines.append({"text": "", "spans": []})
+        return lines
+
+    def commit(self) -> None:
+        new = self.render()
+        old = self.lines
+        prefix = 0
+        while prefix < len(old) and prefix < len(new) and old[prefix] == new[prefix]:
+            prefix += 1
+        suffix = 0
+        while (
+            suffix < len(old) - prefix
+            and suffix < len(new) - prefix
+            and old[-1 - suffix] == new[-1 - suffix]
+        ):
+            suffix += 1
+        self.revision += 1
+        self.lines = new
+        send(
+            {
+                "jsonrpc": "2.0",
+                "method": "agent/transcript/patch",
+                "params": {
+                    "agent_id": self.agent_id,
+                    "revision": self.revision,
+                    "start": prefix,
+                    "end": len(old) - suffix,
+                    "lines": new[prefix : len(new) - suffix],
+                },
+            }
+        )
+
+    def label(self) -> str:
+        current = self.broker.current
+        model = (current.get("provider_options") or {}).get("model")
+        if model:
+            return str(model)
+        provider = "Claude" if current.get("provider") == "claude" else "Codex"
+        return f"{provider} (default model)"
+
+    def push_user(self, text: str) -> None:
+        self.messages.append({"role": "user", "text": text})
+        self.commit()
+
+    def apply_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        last = self.messages[-1] if self.messages else None
+        streaming = last is not None and last["role"] == "assistant" and last["streaming"]
+        if event_type == "message.delta":
+            text = str(payload.get("delta", ""))
+            if streaming and last is not None:
+                last["text"] += text
+            else:
+                self.messages.append(
+                    {"role": "assistant", "label": self.label(), "text": text, "streaming": True}
+                )
+        elif event_type == "message.completed":
+            text = payload.get("text")
+            if streaming and last is not None:
+                if isinstance(text, str) and len(text) >= len(last["text"]):
+                    last["text"] = text
+                last["streaming"] = False
+            elif isinstance(text, str):
+                self.messages.append(
+                    {"role": "assistant", "label": self.label(), "text": text, "streaming": False}
+                )
+            else:
+                return
+        elif event_type in ("turn.completed", "turn.failed") and streaming and last is not None:
+            last["streaming"] = False
+        else:
+            return
+        self.commit()
+
+    def replace(self, messages: list[dict[str, Any]]) -> None:
+        self.messages = [
+            {
+                "role": message["role"],
+                "text": message["text"],
+                "label": message.get("model") or self.label(),
+                "streaming": False,
+            }
+            for message in messages
+        ]
+        self.commit()
+
+    def snapshot(self) -> dict[str, Any]:
+        return {"agent_id": self.agent_id, "revision": self.revision, "lines": self.lines}
+
+
 class Events:
     def __init__(self, broker: Broker) -> None:
         self.broker = broker
@@ -112,6 +230,7 @@ class Events:
                 },
             }
         )
+        self.broker.transcript().apply_event(event_type, payload)
 
 
 class Broker:
@@ -124,9 +243,16 @@ class Broker:
         self.queued_context: list[dict[str, Any]] = []
         self.test_file = os.environ.get("AGENT_MANAGER_TEST_FILE")
         self.deleted_sessions: set[tuple[str, str]] = set()
+        self.transcripts: dict[str, Transcript] = {}
         # Mirror the lifecycle's retry-sibling policy with an older numeric
         # session task already present in the repository.
         self.logical_tasks = {("agent-manager", "session")}
+
+    def transcript(self, agent_id: str | None = None) -> Transcript:
+        agent_id = agent_id or str(self.current["id"])
+        if agent_id not in self.transcripts:
+            self.transcripts[agent_id] = Transcript(self, agent_id)
+        return self.transcripts[agent_id]
 
     def publish_state(self) -> None:
         send(
@@ -511,6 +637,7 @@ class Broker:
                     self.current["title"] = " ".join(words[:6]) or "session"
             turn_id = f"turn-lua-{self.prompt_number}"
             respond(request, {"accepted": True, "turn_id": turn_id})
+            self.transcript().push_user(params["input"]["text"])
             self.set_state("running", turn_id)
             self.events.send("turn.started", {"turn": {"id": turn_id}})
             if self.prompt_number == 1 and self.queued_context:
@@ -555,18 +682,21 @@ class Broker:
                 )
                 self.finish_interactive_turn()
         elif method == "agent/history":
-            respond(
-                request,
-                {
-                    "messages": [
-                        {"id": "history-user", "role": "user", "text": "historic question"},
-                        {"id": "history-assistant", "role": "assistant", "text": "historic answer"},
-                    ],
-                    "cursor": None,
-                },
-            )
+            messages = [
+                {"id": "history-user", "role": "user", "text": "historic question"},
+                {"id": "history-assistant", "role": "assistant", "text": "historic answer"},
+            ]
+            respond(request, {"messages": messages, "cursor": None})
+            self.transcript(params["agent_id"]).replace(messages)
+        elif method == "agent/transcript":
+            known = any(record["id"] == params.get("agent_id") for record in self.records)
+            if not known:
+                reject(request, "unknown agent")
+            else:
+                respond(request, self.transcript(params["agent_id"]).snapshot())
         elif method == "agent/steer":
             respond(request, {"accepted": True})
+            self.transcript().push_user(params["input"]["text"])
             self.events.send("message.delta", {"delta": " steered"})
         elif method == "agent/interrupt":
             if self.queued_prompt_count:
@@ -630,7 +760,7 @@ def main() -> None:
         initialize,
         {
             "protocol_version": 1,
-            "protocol_revision": 1,
+            "protocol_revision": 2,
             "broker_version": "0.2.0",
             "mode": "embedded",
             "providers": {

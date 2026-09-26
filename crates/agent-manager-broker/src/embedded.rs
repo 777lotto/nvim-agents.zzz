@@ -31,6 +31,7 @@ use crate::runtime::{
     discover_models, discover_sessions, spawn_agent,
 };
 use crate::status::StatusStore;
+use crate::transcript::{Patch, Transcript};
 use crate::worker::{
     CLAUDE_COMPATIBILITY_PROFILE, TESTED_CLAUDE_CODE_VERSION, TESTED_CLAUDE_SDK_VERSION,
     WorkerCommandSpec,
@@ -295,6 +296,9 @@ impl BrokerMode {
 struct PendingRuntimeRequest {
     generation: u64,
     public_id: RequestId,
+    /// Set for `agent/history` so the projected messages also refresh the
+    /// broker-owned transcript of this agent.
+    history_agent: Option<String>,
 }
 
 struct QueuedPrompt {
@@ -313,6 +317,7 @@ struct ManagedAgent {
     pending_questions: u64,
     has_prompted: bool,
     title_from_prompt: bool,
+    transcript: Transcript,
 }
 
 struct ResolvedWorkspace {
@@ -371,6 +376,7 @@ impl Broker {
                     pending_questions: 0,
                     has_prompted: true,
                     title_from_prompt: false,
+                    transcript: Transcript::default(),
                 },
             );
         }
@@ -597,6 +603,7 @@ impl Broker {
             }
             "agent/attach" => self.attach_agent(request_id, params),
             "agent/history" => self.history(request_id, params).await,
+            "agent/transcript" => self.transcript(request_id, params),
             "agent/prompt" => {
                 self.send_agent_input(request_id, params, InputKind::Prompt)
                     .await;
@@ -1275,6 +1282,7 @@ impl Broker {
                 pending_questions: 0,
                 has_prompted,
                 title_from_prompt: false,
+                transcript: Transcript::default(),
             },
         );
         self.notify_state();
@@ -1315,6 +1323,9 @@ impl Broker {
             return;
         }
         let runtime_request_id = self.runtime_request(request_id.clone());
+        if let Some(pending) = self.pending_runtime_requests.get_mut(&runtime_request_id) {
+            pending.history_agent = Some(parsed.agent_id.clone());
+        }
         let command_failed = self
             .agents
             .get_mut(&parsed.agent_id)
@@ -1600,6 +1611,7 @@ impl Broker {
             agent.summary.updated_at = timestamp();
         }
         let runtime_request_id = self.runtime_request(request_id.clone());
+        let input_text = input.text.clone();
         let command = match kind {
             InputKind::Prompt => AgentCommand::Prompt {
                 request_id: runtime_request_id.clone(),
@@ -1630,6 +1642,7 @@ impl Broker {
             self.notify_state();
             return;
         }
+        self.record_user_input(&agent_id, &input_text);
         if kind == InputKind::Prompt {
             self.notify_state();
         }
@@ -1876,6 +1889,87 @@ impl Broker {
         self.notify_state();
     }
 
+    fn transcript(&self, request_id: RequestId, params: Value) {
+        let Some(agent_id) = parse_agent_id(params) else {
+            self.send(invalid_params(request_id, "invalid agent id parameters"));
+            return;
+        };
+        let Some(agent) = self.agents.get(&agent_id) else {
+            self.send(agent_not_found(request_id));
+            return;
+        };
+        self.send(success_response(
+            request_id,
+            json!({
+                "agent_id": agent_id,
+                "revision": agent.transcript.revision(),
+                "lines": agent.transcript.lines(),
+            }),
+        ));
+    }
+
+    fn record_user_input(&mut self, agent_id: &str, text: &str) {
+        let Some(agent) = self.agents.get_mut(agent_id) else {
+            return;
+        };
+        let patch = agent.transcript.push_user(text);
+        self.send_transcript_patch(agent_id, &patch);
+    }
+
+    fn handle_runtime_response(&mut self, request_id: &RequestId, result: Value) {
+        self.queued_runtime_requests.remove(request_id);
+        let history = self.history_result(request_id, &result);
+        self.send_runtime_response(request_id, |public_id| success_response(public_id, result));
+        if let Some((agent_id, messages)) = history {
+            self.replace_transcript_history(&agent_id, &messages);
+        }
+    }
+
+    /// The agent and projected messages of a completed `agent/history` request.
+    fn history_result(
+        &self,
+        request_id: &RequestId,
+        result: &Value,
+    ) -> Option<(String, Vec<Value>)> {
+        let agent_id = self
+            .pending_runtime_requests
+            .get(request_id)?
+            .history_agent
+            .clone()?;
+        let messages = result.get("messages")?.as_array()?.clone();
+        Some((agent_id, messages))
+    }
+
+    fn replace_transcript_history(&mut self, agent_id: &str, messages: &[Value]) {
+        let Some(agent) = self.agents.get_mut(agent_id) else {
+            return;
+        };
+        let default_model = agent.summary.provider_options.model.clone();
+        let patch = agent.transcript.replace_history(
+            messages,
+            agent.summary.provider,
+            default_model.as_deref(),
+        );
+        self.send_transcript_patch(agent_id, &patch);
+    }
+
+    fn send_transcript_patch(&self, agent_id: &str, patch: &Patch) {
+        if self.phase != ConnectionPhase::Ready {
+            return;
+        }
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "method": "agent/transcript/patch",
+            "params": {
+                "agent_id": agent_id,
+                "revision": patch.revision,
+                "start": patch.start,
+                "end": patch.end,
+                "lines": patch.lines,
+            },
+        }));
+    }
+
     fn replay(&self, request_id: RequestId, params: Value) {
         let Ok(parsed) = serde_json::from_value::<ReplayParams>(params) else {
             self.send(invalid_params(request_id, "invalid replay parameters"));
@@ -1942,10 +2036,7 @@ impl Broker {
                 self.notify_state();
             }
             RuntimeEvent::Response { request_id, result } => {
-                self.queued_runtime_requests.remove(&request_id);
-                self.send_runtime_response(&request_id, |public_id| {
-                    success_response(public_id, result)
-                });
+                self.handle_runtime_response(&request_id, result);
             }
             RuntimeEvent::RequestFailed {
                 request_id,
@@ -2020,6 +2111,15 @@ impl Broker {
                 "method": "agent/event",
                 "params": event,
             }));
+        }
+        let patch = self.agents.get_mut(&agent_id).and_then(|agent| {
+            let default_model = agent.summary.provider_options.model.clone();
+            agent
+                .transcript
+                .apply_event(&event, default_model.as_deref())
+        });
+        if let Some(patch) = patch {
+            self.send_transcript_patch(&agent_id, &patch);
         }
         if completed {
             if self.agents.get(&agent_id).is_some_and(|agent| {
@@ -2259,6 +2359,7 @@ impl Broker {
             PendingRuntimeRequest {
                 generation: self.connection_generation,
                 public_id,
+                history_agent: None,
             },
         );
         request_id

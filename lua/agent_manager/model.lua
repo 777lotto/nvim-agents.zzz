@@ -86,7 +86,7 @@ function Model.new(opts)
     workspace_repositories = {},
     selected_agent_id = nil,
     events = {},
-    conversations = {},
+    transcripts = {},
     activities = {},
     pending_actions = {},
     pending_order = {},
@@ -97,7 +97,6 @@ function Model.new(opts)
     sequence_gap = nil,
     client_state = "stopped",
     last_error = nil,
-    next_local_id = 1,
     on_change = opts.on_change,
   }, Model)
 end
@@ -124,6 +123,7 @@ function Model:set_client_state(state, err)
     self.external_sessions = {}
     self.external_order = {}
     self.external_activity = {}
+    self.transcripts = {}
   end
   self:_changed("client_state")
 end
@@ -134,6 +134,9 @@ function Model:apply_notification(method, params)
   end
   if method == "agent/event" then
     return self:apply_event(params)
+  end
+  if method == "agent/transcript/patch" then
+    return self:apply_transcript_patch(params)
   end
   return false
 end
@@ -165,8 +168,12 @@ function Model:apply_state(agents)
       end
       next_agents[agent.id] = projected
       table.insert(next_order, agent.id)
-      self.conversations[agent.id] = self.conversations[agent.id] or {}
       self.activities[agent.id] = self.activities[agent.id] or {}
+    end
+  end
+  for agent_id in pairs(self.transcripts) do
+    if not next_agents[agent_id] then
+      self.transcripts[agent_id] = nil
     end
   end
   self.agents = next_agents
@@ -322,9 +329,7 @@ function Model:apply_event(event)
   while #self.events > self.max_events do
     table.remove(self.events, 1)
   end
-  self.conversations[event.agent_id] = self.conversations[event.agent_id] or {}
   self.activities[event.agent_id] = self.activities[event.agent_id] or {}
-  self:_project_conversation(stored)
   self:_project_human_request(stored)
   if stored.type == "usage.updated" then
     self.usage[event.agent_id] = deep_copy(stored.payload or {})
@@ -374,101 +379,120 @@ function Model:_project_human_request(event)
   end
 end
 
-function Model:_project_conversation(event)
-  local conversation = self.conversations[event.agent_id]
-  local agent = self.agents[event.agent_id]
-  local payload = event.payload or {}
-  local response_model = type(payload.model) == "string" and payload.model
-    or (agent and agent.provider_options and agent.provider_options.model)
-  local event_type = event.type or ""
-  if event_type == "message.delta" then
-    local text = text_from(event.payload) or ""
-    local current = conversation[#conversation]
-    if not current or current.role ~= "assistant" or not current.streaming then
-      current = {
-        id = "assistant:" .. tostring(event.sequence),
-        role = "assistant",
-        text = "",
-        streaming = true,
-        provider = event.provider,
-        model = response_model,
-      }
-      table.insert(conversation, current)
+local function valid_transcript_lines(lines)
+  if type(lines) ~= "table" then
+    return nil
+  end
+  local copied = {}
+  for index, line in ipairs(lines) do
+    if type(line) ~= "table" or type(line.text) ~= "string" then
+      return nil
     end
-    current.text = current.text .. text
-  elseif event_type == "message.completed" then
-    local text = text_from(event.payload)
-    local current = conversation[#conversation]
-    if current and current.role == "assistant" and current.streaming then
-      if text and #text >= #current.text then
-        current.text = text
+    local spans = {}
+    for _, span in ipairs(type(line.spans) == "table" and line.spans or {}) do
+      if
+        type(span) == "table"
+        and type(span.start) == "number"
+        and type(span["end"]) == "number"
+        and type(span.style) == "string"
+        and span.start >= 0
+        and span["end"] > span.start
+        and span["end"] <= #line.text
+      then
+        spans[#spans + 1] = { start = span.start, finish = span["end"], style = span.style }
       end
-      current.streaming = false
-    elseif text then
-      table.insert(conversation, {
-        id = "assistant:" .. tostring(event.sequence),
-        role = "assistant",
-        text = text,
-        streaming = false,
-        provider = event.provider,
-        model = response_model,
-      })
     end
-  elseif event_type == "turn.completed" or event_type == "turn.failed" then
-    local current = conversation[#conversation]
-    if current and current.role == "assistant" then
-      current.streaming = false
-    end
+    copied[index] = { text = line.text, spans = spans }
   end
+  return copied
 end
 
-function Model:record_user_input(agent_id, text, kind)
-  if not self.agents[agent_id] then
+-- The broker owns the transcript presentation. The model keeps one cached
+-- copy per agent and a queue of the line-range patches applied since the view
+-- last painted, so the view can replace only the lines that changed. A patch
+-- that does not continue the cached revision marks the cache stale; the view
+-- then asks for a fresh snapshot through agent/transcript.
+function Model:apply_transcript_patch(patch)
+  if type(patch) ~= "table" or type(patch.agent_id) ~= "string" or not self.agents[patch.agent_id] then
     return false
   end
-  self.conversations[agent_id] = self.conversations[agent_id] or {}
-  local local_id = self.next_local_id
-  self.next_local_id = self.next_local_id + 1
-  table.insert(self.conversations[agent_id], {
-    id = "local:" .. tostring(local_id),
-    role = "user",
-    text = text,
-    kind = kind or "prompt",
-    streaming = false,
-  })
-  self:_changed(kind or "prompt")
+  local cached = self.transcripts[patch.agent_id]
+  local lines = valid_transcript_lines(patch.lines)
+  if
+    not cached
+    or cached.stale
+    or not lines
+    or type(patch.revision) ~= "number"
+    or patch.revision ~= cached.revision + 1
+    or type(patch.start) ~= "number"
+    or type(patch["end"]) ~= "number"
+    or patch.start < 0
+    or patch["end"] < patch.start
+    or patch["end"] > #cached.lines
+  then
+    self.transcripts[patch.agent_id] = { revision = 0, lines = {}, patches = {}, stale = true }
+    self:_changed("transcript")
+    return true
+  end
+  for _ = patch.start + 1, patch["end"] do
+    table.remove(cached.lines, patch.start + 1)
+  end
+  for index, line in ipairs(lines) do
+    table.insert(cached.lines, patch.start + index, line)
+  end
+  cached.revision = patch.revision
+  cached.patches[#cached.patches + 1] = {
+    base = patch.revision - 1,
+    revision = patch.revision,
+    start = patch.start,
+    finish = patch["end"],
+    lines = lines,
+  }
+  -- An agent that streams while another is selected never has its patches
+  -- painted. The cached lines stay current, so dropping the queue only means
+  -- the next paint of that agent is a full one.
+  if #cached.patches > 64 then
+    cached.patches = {}
+  end
+  self:_changed("transcript")
   return true
 end
 
-function Model:apply_history(agent_id, messages)
-  if not self.agents[agent_id] or type(messages) ~= "table" then
+function Model:set_transcript(snapshot)
+  if type(snapshot) ~= "table" or type(snapshot.agent_id) ~= "string" or not self.agents[snapshot.agent_id] then
     return false
   end
-  local conversation = {}
-  for index, message in ipairs(messages) do
-    if
-      type(message) == "table"
-      and (message.role == "user" or message.role == "assistant" or message.role == "system")
-      and type(message.text) == "string"
-    then
-      table.insert(conversation, {
-        id = message.id or ("history:" .. tostring(index)),
-        role = message.role,
-        text = message.text,
-        streaming = false,
-        history = true,
-        model = type(message.model) == "string" and message.model or nil,
-      })
-    end
+  local lines = valid_transcript_lines(snapshot.lines)
+  if not lines or type(snapshot.revision) ~= "number" then
+    return false
   end
-  self.conversations[agent_id] = conversation
-  self:_changed("history")
+  self.transcripts[snapshot.agent_id] = {
+    revision = snapshot.revision,
+    lines = lines,
+    patches = {},
+    stale = false,
+  }
+  self:_changed("transcript")
   return true
+end
+
+function Model:transcript(agent_id)
+  return self.transcripts[agent_id or self.selected_agent_id]
+end
+
+function Model:take_transcript_patches(agent_id)
+  local cached = self.transcripts[agent_id or self.selected_agent_id]
+  if not cached then
+    return {}
+  end
+  local patches = cached.patches
+  cached.patches = {}
+  return patches
 end
 
 function Model:begin_resync(latest_sequence)
   self.events = {}
-  self.conversations = {}
+  self.transcripts = {}
   self.activities = {}
   self.pending_actions = {}
   self.pending_order = {}
@@ -476,7 +500,6 @@ function Model:begin_resync(latest_sequence)
   self.last_sequence = tonumber(latest_sequence) or 0
   self.sequence_gap = nil
   for _, agent_id in ipairs(self.order) do
-    self.conversations[agent_id] = {}
     self.activities[agent_id] = {}
   end
   self:_changed("history_resync")
@@ -553,10 +576,6 @@ function Model:selected_agent()
   return deep_copy(self.agents[self.selected_agent_id])
 end
 
-function Model:conversation(agent_id)
-  return deep_copy(self.conversations[agent_id or self.selected_agent_id] or {})
-end
-
 function Model:activity(agent_id)
   return deep_copy(self.activities[agent_id or self.selected_agent_id] or {})
 end
@@ -618,7 +637,7 @@ function Model:snapshot()
     workspace_repositories = self:workspace_list(),
     selected_agent_id = self.selected_agent_id,
     events = self.events,
-    conversations = self.conversations,
+    transcripts = self.transcripts,
     activities = self.activities,
     pending_actions = self.pending_actions,
     pending_order = self.pending_order,

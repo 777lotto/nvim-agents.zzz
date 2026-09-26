@@ -2,7 +2,7 @@ local Client = {}
 Client.__index = Client
 
 local protocol_version = 1
-local protocol_revision = 1
+local protocol_revision = 2
 
 local function error_object(kind, message, code)
   return { kind = kind, message = message, code = code }

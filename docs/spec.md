@@ -143,6 +143,8 @@ The Lua plugin owns:
 - workspace buffers, windows, layout, focus, mappings, and commands;
 - a local broker client with asynchronous read/write queues;
 - normalized presentation state and bounded in-memory event projection;
+- a cached copy of each agent's broker-owned transcript presentation, applied
+  as line-range patches;
 - explicit editor context capture;
 - approval and clarification presentation;
 - diff/file-change presentation and dirty-buffer coordination;
@@ -315,6 +317,7 @@ The initialization response includes:
 | `agent/start`             | Start in a managed task or explicit working directory.          |
 | `agent/attach`            | Subscribe to an agent owned by the broker.                      |
 | `agent/history`           | Fetch provider-backed projected history.                        |
+| `agent/transcript`        | Fetch the broker-owned styled transcript presentation.          |
 | `agent/prompt`            | Start the next normal user turn.                                |
 | `agent/steer`             | Add context or redirect an active turn when supported.          |
 | `agent/interrupt`         | Cancel the active turn without deleting its session.            |
@@ -641,6 +644,12 @@ maintaining a competing set.
   session ID.
 - **Conversation:** user and assistant messages with incremental updates,
   compaction boundaries, provider notices, and a persistent bottom prompt box.
+  The broker owns the transcript presentation: it projects messages into
+  lines with semantic style spans (line-local Markdown styling, speaker
+  labels, user text, streaming marker) and streams `agent/transcript/patch`
+  line-range patches; `agent/transcript` returns the snapshot at a revision.
+  The plugin rewrites only patched rows and attaches no treesitter parser or
+  Markdown renderer to the pane, so streaming redraws one line per delta.
   The prompt wraps at word boundaries, expands between configured minimum and
   maximum heights, resets after a successful send, and receives focus after
   model selection.

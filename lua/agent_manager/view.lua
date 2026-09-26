@@ -3,7 +3,9 @@ View.__index = View
 
 local pane_names = { "agents", "conversation" }
 
--- The transcript is Markdown source. Registering the pane's own filetype as a
+-- The transcript is painted from the broker's transcript projection: styled
+-- line-range patches applied in place, with no treesitter parse of the pane.
+-- The directory and help panes are still Markdown source. Registering a pane's own filetype as a
 -- Markdown dialect lets Neovim's bundled parser highlight it and lets an
 -- installed render-markdown.nvim (when its `file_types` names this filetype)
 -- draw headings, tables, and code fences without changing the buffer text.
@@ -343,7 +345,6 @@ local function set_window_options(window, wrap, pane)
       or (pane == "decision" or pane == "workflow_detail" or pane == "bottom_help") and "context" or "log"
     local buffer = vim.api.nvim_win_get_buf(window)
     local content = navigation and vim.b[buffer].agent_manager_markdown ~= false and "markdown"
-      or pane == "conversation" and vim.b[buffer].agent_manager_markdown ~= false and "markdown"
       or pane == "workflow_detail" and vim.b[buffer].agent_manager_markdown ~= false and "markdown"
       or pane == "bottom_help" and "markdown"
       or "plaintext"
@@ -407,6 +408,13 @@ function View.new(model, actions, opts)
     render_pending = false,
     prompt_submitting = false,
     last_action_id = nil,
+    painted = nil,
+    last_lines = {},
+    markdown = {
+      enabled = opts.conversation_markdown ~= false,
+      active = opts.conversation_markdown ~= false,
+      backend = "broker",
+    },
   }, View)
   self:_create_autocmds()
   return self
@@ -507,7 +515,7 @@ function View:_buffer(name)
     plugin_id = "agent.manager",
     pane = name,
   }
-  if name == "conversation" or name == "agents" or name == "bottom_help" then
+  if name == "agents" or name == "bottom_help" then
     self:_attach_markdown(buffer, name == "agents" and directory_filetype or conversation_filetype, name)
   end
   if name == "prompt" then
@@ -530,8 +538,7 @@ function View:_attach_markdown(buffer, filetype, pane)
   local enabled = self.opts.conversation_markdown ~= false
   local state = { enabled = enabled, active = false }
   if pane == "agents" then self.directory_markdown = state
-  elseif pane == "bottom_help" then self.bottom_markdown = state
-  else self.markdown = state end
+  else self.bottom_markdown = state end
   vim.b[buffer].agent_manager_markdown = enabled
   if not enabled then
     return false
@@ -1309,24 +1316,45 @@ function View:render()
   self:_sync_decision(action)
 end
 
-function View:_set_lines(name, lines, highlights)
-  local buffer = self:_buffer(name)
-  vim.bo[buffer].modifiable = true
-  vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
-  vim.bo[buffer].modifiable = false
-  vim.bo[buffer].modified = false
-  vim.api.nvim_buf_clear_namespace(buffer, self.namespace, 0, -1)
+local function add_highlights(buffer, namespace, highlights)
   for _, highlight in ipairs(highlights or {}) do
     pcall(
       vim.api.nvim_buf_add_highlight,
       buffer,
-      self.namespace,
+      namespace,
       highlight.group,
       highlight.line - 1,
       highlight.start or 0,
       highlight.finish or -1
     )
   end
+end
+
+-- Replace a pane's whole content. Unchanged content is left alone so a
+-- streaming transcript does not redraw the directory, help, and decision
+-- panes on every delta.
+function View:_set_lines(name, lines, highlights)
+  local buffer = self:_buffer(name)
+  if name == "conversation" then
+    self.painted = nil
+  end
+  self.last_lines = self.last_lines or {}
+  local previous = self.last_lines[buffer]
+  if
+    previous
+    and vim.deep_equal(previous.lines, lines)
+    and vim.deep_equal(previous.highlights, highlights or {})
+    and vim.api.nvim_buf_line_count(buffer) == #lines
+  then
+    return
+  end
+  self.last_lines[buffer] = { lines = vim.deepcopy(lines), highlights = vim.deepcopy(highlights or {}) }
+  vim.bo[buffer].modifiable = true
+  vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
+  vim.bo[buffer].modifiable = false
+  vim.bo[buffer].modified = false
+  vim.api.nvim_buf_clear_namespace(buffer, self.namespace, 0, -1)
+  add_highlights(buffer, self.namespace, highlights)
 end
 
 -- Reapply presentation to cached rows without traversing directories or
@@ -1702,14 +1730,57 @@ function View:_render_agents()
   self:_present_agents()
 end
 
-function View:_render_conversation()
-  if self.inspected_diff then
-    if self.inspected_diff.agent_id == self.model.selected_agent_id then
-      self:_set_lines("conversation", self.inspected_diff.lines, self.inspected_diff.highlights)
-      return
-    end
-    self.inspected_diff = nil
+-- Broker transcript styles mapped to the presentation catalog's groups.
+local transcript_style_groups = {
+  label_assistant = "AgentManagerMessageAssistant",
+  label_system = "AgentManagerMessageSystem",
+  message_user = "AgentManagerMessageUser",
+  streaming = "AgentManagerMuted",
+  heading = "AgentManagerMarkdownHeading",
+  code_fence = "AgentManagerMarkdownFence",
+  code = "AgentManagerMarkdownCode",
+  code_span = "AgentManagerMarkdownCodeSpan",
+  strong = "AgentManagerMarkdownStrong",
+  emphasis = "AgentManagerMarkdownEmphasis",
+  list_marker = "AgentManagerMarkdownListMarker",
+  quote = "AgentManagerMarkdownQuote",
+  link = "AgentManagerMarkdownLink",
+  rule = "AgentManagerMarkdownRule",
+  table_border = "AgentManagerMarkdownTableBorder",
+}
+local transcript_markdown_styles = {
+  heading = true, code_fence = true, code = true, code_span = true, strong = true, emphasis = true,
+  list_marker = true, quote = true, link = true, rule = true, table_border = true,
+}
+-- Lines the view owns above the transcript body: the pane title, the session
+-- line, and a separator.
+local transcript_header_lines = 3
+-- Every non-empty transcript line is indented by one column.
+local transcript_gutter = " "
+
+local function transcript_row(text)
+  if text == "" then
+    return ""
   end
+  return transcript_gutter .. text
+end
+
+function View:_transcript_highlights(row, line, into)
+  local styled = self.opts.conversation_markdown ~= false
+  for _, span in ipairs(line.spans) do
+    local group = transcript_style_groups[span.style]
+    if group and (styled or not transcript_markdown_styles[span.style]) then
+      into[#into + 1] = {
+        line = row,
+        group = group,
+        start = span.start + #transcript_gutter,
+        finish = span.finish + #transcript_gutter,
+      }
+    end
+  end
+end
+
+function View:_conversation_header()
   local agent = self.draft and nil or self.model:selected_agent()
   local subject = agent or self.draft
   local options = subject and subject.provider_options or {}
@@ -1726,13 +1797,87 @@ function View:_render_conversation()
   elseif self.draft then
     title = provider_label
   end
-  local lines = { " 2 CONVERSATION", " " .. title, "" }
-  local highlights = {
+  return agent, { " 2 CONVERSATION", " " .. title, "" }, {
     { line = 1, group = "AgentManagerTitle" },
     { line = 2, group = "AgentManagerMuted" },
   }
-  local messages = self.draft and {} or self.model:conversation()
-  if #messages == 0 then
+end
+
+-- Apply broker patches to the painted transcript body in place. Only the
+-- replaced rows are rewritten and restyled; everything else keeps its
+-- extmarks, so a streaming reply changes one line per delta.
+function View:_paint_transcript_patches(buffer, patches)
+  vim.bo[buffer].modifiable = true
+  for _, patch in ipairs(patches) do
+    local texts = {}
+    local highlights = {}
+    local first = transcript_header_lines + patch.start
+    for index, line in ipairs(patch.lines) do
+      texts[index] = transcript_row(line.text)
+      self:_transcript_highlights(first + index, line, highlights)
+    end
+    vim.api.nvim_buf_set_lines(buffer, first, transcript_header_lines + patch.finish, false, texts)
+    vim.api.nvim_buf_clear_namespace(buffer, self.namespace, first, first + #texts)
+    add_highlights(buffer, self.namespace, highlights)
+  end
+  vim.bo[buffer].modifiable = false
+  vim.bo[buffer].modified = false
+end
+
+function View:_render_conversation()
+  if self.inspected_diff then
+    if self.inspected_diff.agent_id == self.model.selected_agent_id then
+      self:_set_lines("conversation", self.inspected_diff.lines, self.inspected_diff.highlights)
+      return
+    end
+    self.inspected_diff = nil
+  end
+  local agent, header, header_highlights = self:_conversation_header()
+  local transcript = agent and self.model:transcript(agent.id) or nil
+  if agent and (not transcript or transcript.stale) and self.actions.transcript then
+    self.actions.transcript(agent.id)
+  end
+  local usable = transcript and not transcript.stale and #transcript.lines > 0
+  local patches = agent and self.model:take_transcript_patches(agent.id) or {}
+  local painted = self.painted
+  local buffer = self:_buffer("conversation")
+  if transcript and transcript.stale and painted and painted.agent_id == agent.id then
+    -- A snapshot is on its way; keep the last painted transcript rather than
+    -- flashing the empty placeholder in the middle of a reply.
+    return
+  end
+  if painted and agent and usable and painted.agent_id == agent.id and painted.body then
+    local continuous = #patches == 0 and painted.revision == transcript.revision
+      or #patches > 0
+        and patches[1].base == painted.revision
+        and patches[#patches].revision == transcript.revision
+    if continuous then
+      if not vim.deep_equal(painted.header, header) then
+        vim.bo[buffer].modifiable = true
+        vim.api.nvim_buf_set_lines(buffer, 0, transcript_header_lines, false, header)
+        vim.bo[buffer].modifiable = false
+        vim.bo[buffer].modified = false
+        vim.api.nvim_buf_clear_namespace(buffer, self.namespace, 0, transcript_header_lines)
+        add_highlights(buffer, self.namespace, header_highlights)
+        painted.header = header
+        self.last_lines[buffer] = nil
+      end
+      if #patches > 0 then
+        self:_paint_transcript_patches(buffer, patches)
+        painted.revision = transcript.revision
+        self.last_lines[buffer] = nil
+      end
+      return
+    end
+  end
+  local lines = vim.list_extend({}, header)
+  local highlights = vim.list_extend({}, header_highlights)
+  if usable then
+    for _, line in ipairs(transcript.lines) do
+      lines[#lines + 1] = transcript_row(line.text)
+      self:_transcript_highlights(#lines, line, highlights)
+    end
+  else
     if agent then
       table.insert(lines, " Type in the prompt box below and press <CR> to send.")
     elseif self.draft then
@@ -1742,39 +1887,13 @@ function View:_render_conversation()
     end
     table.insert(highlights, { line = #lines, group = "AgentManagerMuted" })
   end
-  for _, message in ipairs(messages) do
-    if message.role ~= "user" then
-      local active_options = agent and agent.provider_options or {}
-      local label = (message.model ~= vim.NIL and message.model)
-        or (active_options.model ~= vim.NIL and active_options.model)
-        or (provider or "Agent") .. " (default model)"
-      if message.role == "system" then
-        label = "SYSTEM"
-      end
-      -- A level-two heading keeps the label a Markdown block of its own, so
-      -- the reply below cannot merge into it or turn it into a setext
-      -- heading, and Markdown renderers draw it as a section divider.
-      table.insert(lines, " ## " .. inline(label))
-      table.insert(highlights, {
-        line = #lines,
-        group = message.role == "system" and "AgentManagerMessageSystem"
-          or "AgentManagerMessageAssistant",
-      })
-      table.insert(lines, "")
-    end
-    for _, line in ipairs(text_lines(message.text)) do
-      table.insert(lines, " " .. line)
-      if message.role == "user" then
-        table.insert(highlights, { line = #lines, group = "AgentManagerMessageUser" })
-      end
-    end
-    if message.streaming then
-      table.insert(lines, " …")
-      table.insert(highlights, { line = #lines, group = "AgentManagerMuted" })
-    end
-    table.insert(lines, "")
-  end
   self:_set_lines("conversation", lines, highlights)
+  self.painted = agent and {
+    agent_id = agent.id,
+    revision = transcript and transcript.revision or nil,
+    header = header,
+    body = usable == true,
+  } or nil
 end
 
 function View:_render_decision(action)
@@ -2031,7 +2150,7 @@ function View:status()
     home = self.home,
     buffers = vim.deepcopy(self.buffers),
     windows = vim.deepcopy(self.windows),
-    markdown = vim.deepcopy(self.markdown or { enabled = self.opts.conversation_markdown ~= false, active = false }),
+    markdown = vim.deepcopy(self.markdown),
     directory_markdown = vim.deepcopy(self.directory_markdown or { enabled = self.opts.conversation_markdown ~= false, active = false }),
     backend = "native",
   }

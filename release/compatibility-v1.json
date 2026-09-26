@@ -10,7 +10,7 @@
   },
   "protocols": {
     "broker": 1,
-    "broker_revision": 1,
+    "broker_revision": 2,
     "claude_worker": 1
   },
   "providers": {

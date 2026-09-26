@@ -257,20 +257,21 @@ restart. Explicit steering (`ts`) still sends input to the current turn.
 
 Token totals appear under Usage in the directory.
 
-Conversation shows the responding model in a blue, unbolded label written as a
-level-two Markdown heading (`## model-name`) with a blank line after it. User
-messages have no speaker heading and their text is purple. Neovim's text grid
-cannot use a smaller font for individual labels.
+Conversation shows the responding model in a blue, unbolded label with a blank
+line after it. User messages have no speaker heading and their text is purple.
+Neovim's text grid cannot use a smaller font for individual labels.
 
-The transcript keeps provider text verbatim as Markdown source. Its
-`agent-manager-conversation` filetype is registered as a dialect of Neovim's
-bundled `markdown` treesitter parser, so headings, code fences, tables, and
-inline code are highlighted from the colorscheme. A Neovim configuration that
-installs render-markdown.nvim gets the drawn transcript through Chrome's pane
-integration. Without Chrome, add `agent-manager-conversation` and
-`agent-manager-agents` to that plugin's `file_types`; Agent Manager's own
-label and user-message highlights are applied on top and remain visible. Set
-`ui.conversation_markdown = false` to leave the transcript unparsed.
+The transcript keeps provider text verbatim. The broker owns its presentation:
+it projects every message into lines with semantic style spans (headings,
+code fences and blocks, inline code, strong and emphasized text, list markers,
+quotes, links, rules, and table borders) and streams line-range patches as a
+reply arrives. The plugin repaints only the patched rows, so a streaming delta
+rewrites one line and nothing flickers. No treesitter parser or Markdown
+renderer runs on the conversation pane; render-markdown.nvim still applies to
+the directory pane through Chrome when it lists `agent-manager-agents`. Styles
+map to the `AgentManagerMarkdown*` highlight groups in the presentation
+catalog. Set `ui.conversation_markdown = false` to keep speaker and user
+highlights only.
 
 `df` shows a workspace diff in the conversation window. The inspected diff is
 a snapshot; press `df` again to refresh it.
@@ -552,8 +553,8 @@ When UX Chrome's `ux_chrome.panes` API is available, Agent Manager attaches its
 directory, conversation, workflow detail, approval, and bottom windows to shared pane
 roles. Foundation/Styling can edit role defaults or individual pane overrides
 without changing Agent Manager's content or actions. The conversation declares
-Markdown content unless `ui.conversation_markdown` is disabled. The directory
-and workflow lists also declare Markdown content. Older Chrome
+plain-text content because the broker's transcript projection already styles
+it. The directory and workflow lists declare Markdown content. Older Chrome
 versions and installations without Chrome retain the native presentation.
 
 ### Shared navigation components

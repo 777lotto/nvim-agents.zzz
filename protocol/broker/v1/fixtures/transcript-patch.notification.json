@@ -1,0 +1,23 @@
+{
+  "jsonrpc": "2.0",
+  "method": "agent/transcript/patch",
+  "params": {
+    "agent_id": "a4e9d943-2310-42fd-b470-6f63c83f0181",
+    "revision": 7,
+    "start": 2,
+    "end": 4,
+    "lines": [
+      { "text": "gpt-fixture", "spans": [{ "start": 0, "end": 11, "style": "label_assistant" }] },
+      { "text": "", "spans": [] },
+      { "text": "## Fixtures", "spans": [{ "start": 0, "end": 11, "style": "heading" }] },
+      { "text": "", "spans": [] },
+      { "text": "- `agent-event.notification.json` is the **first** one", "spans": [
+        { "start": 0, "end": 2, "style": "list_marker" },
+        { "start": 2, "end": 33, "style": "code_span" },
+        { "start": 41, "end": 50, "style": "strong" }
+      ] },
+      { "text": "\u2026", "spans": [{ "start": 0, "end": 3, "style": "streaming" }] },
+      { "text": "", "spans": [] }
+    ]
+  }
+}

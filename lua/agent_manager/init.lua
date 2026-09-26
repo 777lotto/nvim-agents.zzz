@@ -321,6 +321,9 @@ function M.setup(opts)
     provider_options = function(agent)
       return options_for_agent(agent)
     end,
+    transcript = function(agent_id)
+      M.transcript(agent_id)
+    end,
     select = function(session)
       runtime.draft = nil
       view:set_draft(nil)
@@ -368,6 +371,7 @@ function M.setup(opts)
     draft = nil,
     agent_options = {},
     model_catalogs = {},
+    transcript_requests = {},
   }
   for _, provider in ipairs({ "codex", "claude" }) do
     local configured = config.providers[provider] or {}
@@ -622,7 +626,6 @@ local function send_input(method, kind, agent_id, input, callback)
         if result and result.queued then
           vim.notify("Agent Manager: prompt queued (" .. tostring(result.position) .. ")", vim.log.levels.INFO)
         end
-        runtime.model:record_user_input(agent_id, normalized.text, kind)
         runtime.view:schedule_render()
         finish(callback, result, nil)
       end
@@ -1077,8 +1080,49 @@ function M.history(agent_id, callback)
       "agent/history",
       { agent_id = agent_id, cursor = vim.NIL, limit = 200 },
       function(result, rpc_err)
-        if result and result.messages then
-          runtime.model:apply_history(agent_id, result.messages)
+        if rpc_err then
+          report(rpc_err)
+        end
+        finish(callback, result, rpc_err)
+      end
+    )
+    if request_err then
+      report(request_err)
+      finish(callback, nil, request_err)
+    end
+  end, callback)
+end
+
+-- Fetch the broker-owned transcript snapshot for an agent. The view asks for
+-- it when no cached transcript exists or a patch could not be applied in
+-- order; one request per agent is in flight at a time.
+function M.transcript(agent_id, callback)
+  if not ensure_setup() then
+    local err = structured_error("configuration", "Agent Manager setup failed")
+    finish(callback, nil, err)
+    return nil, err
+  end
+  agent_id = selected_id(agent_id)
+  if not agent_id then
+    local err = structured_error("input", "no agent is selected")
+    finish(callback, nil, err)
+    return nil, err
+  end
+  if runtime.transcript_requests[agent_id] then
+    finish(callback, nil, nil)
+    return true
+  end
+  runtime.transcript_requests[agent_id] = true
+  local requesting = runtime
+  return with_client(function()
+    local _, request_err = runtime.client:request(
+      "agent/transcript",
+      { agent_id = agent_id },
+      function(result, rpc_err)
+        if runtime == requesting then
+          runtime.transcript_requests[agent_id] = nil
+        end
+        if runtime == requesting and result and runtime.model:set_transcript(result) then
           runtime.view:schedule_render()
         end
         if rpc_err then
@@ -1088,6 +1132,9 @@ function M.history(agent_id, callback)
       end
     )
     if request_err then
+      if runtime == requesting then
+        runtime.transcript_requests[agent_id] = nil
+      end
       report(request_err)
       finish(callback, nil, request_err)
     end

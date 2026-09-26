@@ -63,6 +63,13 @@ generated bundle is a review baseline, not a required installed CLI version.
 - Agent summaries report the actual provider runtime and compatibility profile
   learned during startup. A resumed session is opened by the currently
   configured compatible runtime; a live provider process is never hot-swapped.
+- Protocol revision 2 adds the broker-owned transcript projection: the
+  `agent/transcript` request returns the complete presentation (`lines` of
+  verbatim `text` with byte-offset `spans` naming a semantic `style`) at a
+  `revision`, and the `agent/transcript/patch` notification replaces
+  `[start, end)` of `revision - 1` with new lines. A client that is not at
+  `revision - 1` requests the snapshot instead of applying the patch. Styles are
+  a closed enum; text is never rewritten or concealed by the broker.
 - Malformed frames, duplicate callback responses, and unknown callback IDs fail
   closed.
 

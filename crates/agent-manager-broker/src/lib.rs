@@ -14,6 +14,7 @@ mod registry;
 pub mod replay;
 mod runtime;
 mod status;
+pub mod transcript;
 pub mod worker;
 pub mod workspace;
 

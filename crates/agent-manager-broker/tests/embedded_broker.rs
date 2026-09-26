@@ -343,7 +343,7 @@ async fn prove_embedded_flow(provider: Provider) {
         .await;
     let initialized = harness.response(1).await;
     assert_eq!(initialized["result"]["protocol_version"], 1);
-    assert_eq!(initialized["result"]["protocol_revision"], 1);
+    assert_eq!(initialized["result"]["protocol_revision"], 2);
     assert_eq!(initialized["result"]["mode"], "embedded");
     harness
         .send(json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }))
@@ -454,6 +454,18 @@ async fn prove_embedded_flow(provider: Provider) {
     assert_eq!(harness.response(21).await["result"]["queued"], true);
 
     send_input(&mut harness, 3, "agent/prompt", &agent_id, "first prompt").await;
+    let patch = harness
+        .wait_for(|message| message["method"] == "agent/transcript/patch")
+        .await;
+    assert_eq!(patch["params"]["agent_id"], json!(agent_id));
+    assert_eq!(patch["params"]["revision"], 1);
+    assert_eq!(patch["params"]["start"], 0);
+    assert_eq!(patch["params"]["end"], 0);
+    assert_eq!(patch["params"]["lines"][0]["text"], "first prompt");
+    assert_eq!(
+        patch["params"]["lines"][0]["spans"][0]["style"],
+        "message_user"
+    );
     assert_eq!(harness.response(3).await["result"]["accepted"], true);
     harness.event("tool.started").await;
     let approval = harness.event("approval.requested").await;
@@ -613,6 +625,38 @@ async fn prove_embedded_flow(provider: Provider) {
     assert_eq!(
         harness.response(9).await["result"]["agent"]["state"],
         "interrupted"
+    );
+
+    harness
+        .send(request(
+            90,
+            "agent/transcript",
+            json!({ "agent_id": agent_id }),
+        ))
+        .await;
+    let transcript = harness.response(90).await;
+    assert_eq!(transcript["result"]["agent_id"], json!(agent_id));
+    assert!(
+        transcript["result"]["revision"]
+            .as_u64()
+            .is_some_and(|revision| revision > 1)
+    );
+    let lines = transcript["result"]["lines"]
+        .as_array()
+        .expect("transcript lines");
+    // agent/history re-projects the transcript from provider history, so the
+    // dispatched prompt was replaced by the fixture's projected messages.
+    assert_eq!(lines[0]["text"], "historic question");
+    assert_eq!(lines[0]["spans"][0]["style"], "message_user");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line["spans"][0]["style"] == "label_assistant"),
+        "the transcript labels the provider reply"
+    );
+    assert!(
+        lines.iter().all(|line| line["text"] != "\u{2026}"),
+        "no reply is still streaming after the interrupt"
     );
 
     harness
