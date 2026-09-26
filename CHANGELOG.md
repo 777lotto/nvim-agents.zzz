@@ -7,6 +7,19 @@ and releases use Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `providers.claude.setting_sources` exposes the Claude setting-source policy
+  that M0 deferred. It is `nil` by default (no sources, strict MCP config) or a
+  list drawn from `user`, `project`, `local`; the plugin passes it to the
+  embedded broker as `--claude-setting-sources`, the broker forwards it as the
+  additive worker-protocol `setting_sources` parameter on session start,
+  resume, and fork, and the worker releases strict MCP configuration only when
+  a source is loaded. `user` makes Neovim-launched Claude sessions load the
+  installed plugin and its MCP servers like a terminal session does.
+- `docs/architecture/m7-acp-provider-seam.md` records the ACP findings,
+  provider footprint measurements, and the M7 plan.
+
 ### Changed
 
 - The broker owns the conversation transcript. Protocol revision 2 adds

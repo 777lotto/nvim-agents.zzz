@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -54,5 +54,6 @@ class Adapter(Protocol):
         fork: bool,
         model: str | None,
         effort: str | None,
+        setting_sources: Sequence[str],
         callback: HumanCallback,
     ) -> Session: ...

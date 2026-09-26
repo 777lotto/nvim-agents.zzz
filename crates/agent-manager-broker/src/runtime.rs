@@ -114,6 +114,7 @@ pub(crate) struct RuntimeConfig {
     pub codex: CommandSpec,
     pub codex_thread_locks: Option<PathBuf>,
     pub claude: WorkerCommandSpec,
+    pub claude_setting_sources: Vec<String>,
     pub callback_timeout: Duration,
 }
 
@@ -123,6 +124,7 @@ impl Default for RuntimeConfig {
             codex: CommandSpec::default(),
             codex_thread_locks: default_thread_lock_directory(),
             claude: WorkerCommandSpec::default(),
+            claude_setting_sources: Vec::new(),
             callback_timeout: DEFAULT_CALLBACK_TIMEOUT,
         }
     }
@@ -170,6 +172,7 @@ pub(crate) fn spawn_agent(
             launch,
             provider_options,
             config.claude,
+            config.claude_setting_sources,
             config.callback_timeout,
             commands_rx,
             events,
@@ -1140,6 +1143,7 @@ async fn run_claude(
     launch: SessionLaunch,
     provider_options: ProviderOptions,
     spec: WorkerCommandSpec,
+    setting_sources: Vec<String>,
     callback_timeout: Duration,
     mut commands: mpsc::Receiver<AgentCommand>,
     events: mpsc::UnboundedSender<RuntimeEvent>,
@@ -1184,6 +1188,7 @@ async fn run_claude(
                 "cwd": cwd,
                 "model": provider_options.model,
                 "effort": provider_options.effort,
+                "setting_sources": setting_sources,
             }),
         ),
         SessionLaunch::Resume(session_id) => (
@@ -1194,6 +1199,7 @@ async fn run_claude(
                 "session_id": session_id,
                 "model": provider_options.model,
                 "effort": provider_options.effort,
+                "setting_sources": setting_sources,
             }),
         ),
         SessionLaunch::Fork(session_id) => (
@@ -1204,6 +1210,7 @@ async fn run_claude(
                 "session_id": session_id,
                 "model": provider_options.model,
                 "effort": provider_options.effort,
+                "setting_sources": setting_sources,
             }),
         ),
     };

@@ -161,6 +161,27 @@ INVALID_CASES: dict[str, tuple[dict[str, Any], ...]] = {
         {"jsonrpc": "2.0", "id": True, "method": "session/list", "params": {}},
         {
             "jsonrpc": "2.0",
+            "id": 16,
+            "method": "session/start",
+            "params": {
+                "agent_id": "agent-1",
+                "cwd": "/workspace/agent-manager",
+                "setting_sources": ["managed"],
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 17,
+            "method": "session/resume",
+            "params": {
+                "agent_id": "agent-1",
+                "cwd": "/workspace/agent-manager",
+                "session_id": "7cb4cc07-6b1e-49c4-90c7-92583343fd91",
+                "setting_sources": ["user", "user"],
+            },
+        },
+        {
+            "jsonrpc": "2.0",
             "method": "session/event",
             "params": {
                 "agent_id": "agent-1",

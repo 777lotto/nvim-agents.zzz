@@ -99,6 +99,10 @@ local function defaults()
         python = default_claude_python(root),
         model = nil,
         effort = nil,
+        -- nil keeps the M0 policy: no setting sources, strict MCP config, so
+        -- plugins, skills, hooks, and MCP servers are not loaded. A list drawn
+        -- from "user", "project", "local" is forwarded to the broker.
+        setting_sources = nil,
       },
     },
     worktrees = {
@@ -218,6 +222,24 @@ function M.resolve(opts)
       kind = "configuration",
       message = "providers.claude.python must be an absolute path",
     }
+  end
+  local setting_sources = config.providers.claude.setting_sources
+  if setting_sources ~= nil then
+    local invalid = {
+      kind = "configuration",
+      message = "providers.claude.setting_sources must be nil or a non-empty list drawn from"
+        .. " 'user', 'project', 'local' without repeats",
+    }
+    if type(setting_sources) ~= "table" or #setting_sources == 0 then
+      return nil, invalid
+    end
+    local seen = {}
+    for _, source in ipairs(setting_sources) do
+      if not vim.tbl_contains({ "user", "project", "local" }, source) or seen[source] then
+        return nil, invalid
+      end
+      seen[source] = true
+    end
   end
   local codex = config.providers.codex.executable
   if codex ~= nil and codex ~= false and (type(codex) ~= "string" or codex == "") then

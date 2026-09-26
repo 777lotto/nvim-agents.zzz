@@ -139,6 +139,8 @@ require("agent_manager").setup({
       python = "/absolute/path/to/agent-manager-worker-runtime/bin/python",
       model = "sonnet", -- optional initial default
       effort = "high", -- optional initial default
+      -- optional; nil keeps plugins, skills, hooks, and MCP servers unloaded
+      setting_sources = { "user" },
     },
   },
   worktrees = {

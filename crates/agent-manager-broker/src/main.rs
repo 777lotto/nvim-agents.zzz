@@ -11,7 +11,7 @@ use agent_manager_broker::embedded::{self, EmbeddedConfig};
 use agent_manager_broker::protocol::{PROTOCOL_REVISION, PROTOCOL_VERSION};
 use agent_manager_broker::worker::{
     CLAUDE_COMPATIBILITY_PROFILE, TESTED_CLAUDE_CODE_VERSION, TESTED_CLAUDE_SDK_VERSION,
-    WORKER_PROTOCOL_VERSION,
+    WORKER_PROTOCOL_VERSION, parse_setting_sources,
 };
 use agent_manager_broker::{BROKER_VERSION, codex};
 use serde_json::{Value, json};
@@ -84,6 +84,10 @@ async fn serve_durable(args: &[String]) -> Result<(), Box<dyn std::error::Error>
                 broker = broker.with_claude_python(python.to_string_lossy());
                 index += 2;
             }
+            "--claude-setting-sources" => {
+                broker = broker.with_claude_setting_sources(setting_sources_option(args, index)?);
+                index += 2;
+            }
             "--codex-bin" => {
                 let executable = absolute_option(args, index, "--codex-bin")?;
                 broker = broker.with_codex_program(executable.to_string_lossy());
@@ -132,6 +136,10 @@ async fn serve_embedded(args: &[String]) -> Result<(), Box<dyn std::error::Error
                     return Err(invalid_input("--claude-python requires an absolute path").into());
                 }
                 config = config.with_claude_python(python);
+                index += 2;
+            }
+            "--claude-setting-sources" => {
+                config = config.with_claude_setting_sources(setting_sources_option(args, index)?);
                 index += 2;
             }
             "--codex-bin" => {
@@ -326,6 +334,13 @@ fn invalid_input(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message.into())
 }
 
+fn setting_sources_option(args: &[String], index: usize) -> Result<Vec<String>, io::Error> {
+    let raw = args
+        .get(index + 1)
+        .ok_or_else(|| invalid_input("--claude-setting-sources requires a comma-separated list"))?;
+    parse_setting_sources(raw).map_err(invalid_input)
+}
+
 fn value_shape(value: &Value) -> &'static str {
     match value {
         Value::Null => "null",
@@ -344,11 +359,13 @@ fn print_help() {
          Commands:\n\
            contract-info\n\
            serve [--codex-bin ABSOLUTE_PATH] [--claude-python ABSOLUTE_PATH]\n\
+                 [--claude-setting-sources user,project,local]\n\
                  [--workspace-lifecycle ABSOLUTE_PATH | --disable-workspace-lifecycle]\n\
                  [--deny-shared-workspaces]\n\
            serve-durable [--socket ABSOLUTE_PATH] [--registry ABSOLUTE_PATH]\n\
                          [--status ABSOLUTE_PATH]\n\
                          [--codex-bin ABSOLUTE_PATH] [--claude-python ABSOLUTE_PATH]\n\
+                         [--claude-setting-sources user,project,local]\n\
                          [--workspace-lifecycle ABSOLUTE_PATH | --disable-workspace-lifecycle]\n\
                          [--deny-shared-workspaces]\n\
            codex-probe --cwd ABSOLUTE_PATH\n\

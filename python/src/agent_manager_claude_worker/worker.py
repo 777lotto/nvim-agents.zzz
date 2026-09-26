@@ -34,6 +34,7 @@ LOGGER = logging.getLogger(__name__)
 CALLBACK_TIMEOUT_SECONDS: Final = 300.0
 SESSION_CLOSE_TIMEOUT_SECONDS: Final = 10.0
 MAX_PAGE_SIZE: Final = 1_000
+SETTING_SOURCES: Final = ("user", "project", "local")
 
 
 class MessageWriter(Protocol):
@@ -72,6 +73,7 @@ class Worker:
         self._sessions: dict[str, Session] = {}
         self._session_options: dict[str, tuple[str | None, str | None]] = {}
         self._session_callbacks: dict[str, HumanCallback] = {}
+        self._session_setting_sources: dict[str, list[str]] = {}
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._turn_tasks: dict[str, asyncio.Task[None]] = {}
         self._pending_responses: dict[str, int] = {}
@@ -145,6 +147,7 @@ class Worker:
         self._sessions.clear()
         self._session_options.clear()
         self._session_callbacks.clear()
+        self._session_setting_sources.clear()
         self._session_locks.clear()
         self._pending_responses.clear()
         for session in sessions:
@@ -298,6 +301,7 @@ class Worker:
         provider_session_id = (
             require_string(params.get("session_id"), "session_id") if resume else None
         )
+        setting_sources = _setting_sources(params.get("setting_sources"))
         callback_session_id = None if fork else provider_session_id
         model = optional_string(params.get("model"), "model")
         effort = _claude_effort(params.get("effort"))
@@ -341,11 +345,13 @@ class Worker:
                 fork=fork,
                 model=model,
                 effort=effort,
+                setting_sources=setting_sources,
                 callback=callback,
             )
             self._sessions[agent_id] = session
             self._session_options[agent_id] = (model, effort)
             self._session_callbacks[agent_id] = callback
+            self._session_setting_sources[agent_id] = setting_sources
             self._session_locks[agent_id] = asyncio.Lock()
             self._pending_responses[agent_id] = 0
             self._sequences[agent_id] = 0
@@ -377,6 +383,7 @@ class Worker:
                     fork=False,
                     model=model,
                     effort=effort,
+                    setting_sources=self._session_setting_sources.get(agent_id, []),
                     callback=self._session_callbacks[agent_id],
                 )
                 self._sessions[agent_id] = session
@@ -422,6 +429,7 @@ class Worker:
             del self._sessions[agent_id]
             del self._session_options[agent_id]
             del self._session_callbacks[agent_id]
+            self._session_setting_sources.pop(agent_id, None)
             del self._session_locks[agent_id]
             self._pending_responses.pop(agent_id, None)
             self._sequences.pop(agent_id, None)
@@ -520,6 +528,21 @@ class Worker:
             )
             return
         future.set_result(cast(JsonObject, value))
+
+
+def _setting_sources(value: JsonValue) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ProtocolFault(-32602, "setting_sources must be a list")
+    sources: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or item not in SETTING_SOURCES:
+            raise ProtocolFault(-32602, "setting_sources must name user, project, or local")
+        if item in sources:
+            raise ProtocolFault(-32602, "setting_sources must not repeat a source")
+        sources.append(item)
+    return sources
 
 
 def _claude_effort(value: JsonValue) -> str | None:
