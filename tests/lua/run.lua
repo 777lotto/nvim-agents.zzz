@@ -46,6 +46,18 @@ local function buffer_line_number(buffer, needle)
   return nil
 end
 
+local function transcript_text(status, agent_id)
+  local transcript = status.model.transcripts[agent_id]
+  if not transcript then
+    return nil
+  end
+  local texts = {}
+  for index, line in ipairs(transcript.lines) do
+    texts[index] = line.text
+  end
+  return table.concat(texts, "\n")
+end
+
 local function highlight_span(buffer, namespace, needle, group)
   local row = assert(buffer_line_number(buffer, needle), "missing row " .. needle) - 1
   for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buffer, namespace,
@@ -74,7 +86,7 @@ local function pure_client_resync_test()
     assert_equal(params.last_sequence, 3, "resync request cursor")
     callback({
       protocol_version = 1,
-      protocol_revision = 1,
+      protocol_revision = 2,
       mode = "durable",
       replay = { resync_required = true, oldest = 40, latest = 41 },
     }, nil)
@@ -166,7 +178,6 @@ local function pure_model_test()
   assert_equal(repositories[1].slug, "agent-manager", "workspace inventory projection")
   repositories[1].slug = "corrupted"
   assert_equal(model:workspace_list()[1].slug, "agent-manager", "workspace inventory is defensive")
-  assert(model:record_user_input("agent-1", "question", "prompt"))
   assert(model:apply_event({
     sequence = 1,
     agent_id = "agent-1",
@@ -212,11 +223,31 @@ local function pure_model_test()
   for _, activity in ipairs(model:activity()) do
     assert(activity.type ~= "usage.updated", "usage updates do not enter the Activity log")
   end
-  assert(model:apply_history("agent-1", {
-    { id = "u", role = "user", text = "historic" },
-    { id = "a", role = "assistant", text = "reply" },
+  assert(model:apply_transcript_patch({
+    agent_id = "agent-1", revision = 1, start = 0, ["end"] = 0,
+    lines = { { text = "historic", spans = {} } },
   }))
-  assert_equal(model:conversation()[2].text, "reply", "history projection")
+  assert_equal(model:transcript("agent-1").stale, true, "a patch without a cached transcript requests a snapshot")
+  assert(model:set_transcript({
+    agent_id = "agent-1", revision = 3,
+    lines = {
+      { text = "historic", spans = { { start = 0, ["end"] = 8, style = "message_user" } } },
+      { text = "", spans = {} },
+    },
+  }))
+  assert_equal(model:transcript("agent-1").stale, false, "a snapshot replaces a stale cache")
+  assert(model:apply_notification("agent/transcript/patch", {
+    agent_id = "agent-1", revision = 4, start = 1, ["end"] = 2,
+    lines = { { text = "reply", spans = {} }, { text = "", spans = {} } },
+  }))
+  assert_equal(model:transcript("agent-1").lines[2].text, "reply", "a patch splices the cached lines")
+  assert_equal(#model:transcript("agent-1").lines, 3, "patched transcript length")
+  assert_equal(#model:take_transcript_patches("agent-1"), 1, "patches queue until the view paints them")
+  assert_equal(#model:take_transcript_patches("agent-1"), 0, "taken patches are consumed")
+  assert(model:apply_transcript_patch({ agent_id = "agent-1", revision = 9, start = 0, ["end"] = 0, lines = {} }))
+  assert_equal(model:transcript("agent-1").stale, true, "a revision gap marks the cache stale")
+  assert(not model:apply_transcript_patch({ agent_id = "unknown", revision = 1, start = 0, ["end"] = 0, lines = {} }),
+    "patches for unknown agents are ignored")
   assert(model:record_file_conflict("agent-1", "/tmp/fixture", { bufnr = 1 }))
   assert_equal(#model:file_conflict_list(), 1, "file conflict projection")
   assert(model:resolve_file_conflict("agent-1", "/tmp/fixture", "kept_buffer"))
@@ -227,7 +258,7 @@ local function pure_model_test()
   assert_equal(model:list()[1].state, "idle", "snapshots must be defensive")
   assert(model:begin_resync(41))
   assert_equal(model:snapshot().last_sequence, 41, "history resync cursor")
-  assert_equal(model:conversation(), {}, "history resync clears stale projection")
+  assert_equal(model:transcript("agent-1"), nil, "history resync drops cached transcripts")
   assert(model:apply_event({
     sequence = 42,
     agent_id = "agent-1",
@@ -762,69 +793,123 @@ local function transcript_presentation_test()
     id = "transcript-agent", provider = "codex", cwd = "/tmp", title = "transcript",
     state = "running", provider_options = { model = "gpt-6-astra" },
   } })
-  model:record_user_input("transcript-agent", "my first line\nmy second line", "prompt")
-  model:apply_event({
-    agent_id = "transcript-agent", sequence = 1, provider = "codex",
-    type = "message.completed", payload = { text = "Reply with **Markdown** intact." },
-  })
-  -- A pending model choice must not relabel the currently running response.
-  local view = View.new(model, { provider_options = function() return { model = "next-model" } end }, {
-    home = vim.fn.tempname(),
-  })
+  local requested = {}
+  local view = View.new(model, {
+    provider_options = function() return { model = "next-model" } end,
+    transcript = function(agent_id) requested[#requested + 1] = agent_id end,
+  }, { home = vim.fn.tempname() })
   assert(view:open())
   local buffer = view.buffers.conversation
-  assert(buffer_has_line(buffer, " ## gpt-6-astra"), "assistant label names the active model as a heading")
-  assert(not buffer_has_line(buffer, " YOU"), "user messages have no speaker heading")
-  assert(not buffer_has_line(buffer, " ## YOU"), "user messages have no speaker heading")
-  assert(not buffer_has_line(buffer, " ASSISTANT"), "generic assistant heading is removed")
-  local label_row = buffer_line_number(buffer, " ## gpt-6-astra")
+  assert_equal(requested, { "transcript-agent" }, "an uncached transcript is requested from the broker")
+  assert(buffer_has_line(buffer, " Type in the prompt box below and press <CR> to send."), "empty transcript placeholder")
+
+  local function span(start, finish, style) return { start = start, ["end"] = finish, style = style } end
+  assert(model:set_transcript({
+    agent_id = "transcript-agent", revision = 2,
+    lines = {
+      { text = "my first line", spans = { span(0, 13, "message_user") } },
+      { text = "my second line", spans = { span(0, 14, "message_user") } },
+      { text = "", spans = {} },
+      { text = "gpt-6-astra", spans = { span(0, 11, "label_assistant") } },
+      { text = "", spans = {} },
+      { text = "Reply with **Markdown** intact.", spans = { span(11, 23, "strong") } },
+      { text = "", spans = {} },
+    },
+  }))
+  view:render()
+  assert(buffer_has_line(buffer, " gpt-6-astra"), "assistant label names the responding model")
+  assert(not buffer_has_line(buffer, " ## gpt-6-astra"), "labels are no longer Markdown headings")
+  local label_row = buffer_line_number(buffer, " gpt-6-astra")
   local after_label = vim.api.nvim_buf_get_lines(buffer, label_row, label_row + 2, false)
   assert(after_label[1] == "", "a blank line separates the label from the reply")
   assert(after_label[2] == " Reply with **Markdown** intact.", "the reply follows the blank line")
   assert(vim.bo[buffer].filetype == "agent-manager-conversation", "conversation keeps its pane filetype")
-  assert(vim.treesitter.language.get_lang("agent-manager-conversation") == "markdown",
-    "conversation filetype resolves to the markdown parser")
-  assert(vim.treesitter.highlighter.active[buffer], "markdown treesitter highlighting is attached")
-  assert(view:status().markdown.active, "view status reports markdown as active")
+  assert(not vim.treesitter.highlighter.active[buffer], "the transcript is never parsed by treesitter")
+  assert(view:status().markdown.active, "view status reports broker styling as active")
   local function highlighted(line, group)
     local row = buffer_line_number(buffer, line) - 1
     for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buffer, view.namespace, { row, 0 }, { row, -1 }, { details = true })) do
       if mark[4].hl_group == group then
-        return true
+        return mark[3], mark[4].end_col
       end
     end
-    return false
+    return nil
   end
   assert(highlighted("my first line", "AgentManagerMessageUser"), "first user line is purple")
   assert(highlighted("my second line", "AgentManagerMessageUser"), "all user lines are purple")
-  assert(highlighted(" ## gpt-6-astra", "AgentManagerMessageAssistant"), "model label is blue")
+  assert(highlighted(" gpt-6-astra", "AgentManagerMessageAssistant"), "model label is blue")
+  local strong_start, strong_end = highlighted("Reply with", "AgentManagerMarkdownStrong")
+  assert_equal({ strong_start, strong_end }, { 12, 24 }, "broker spans shift by the one-column gutter")
   assert(not highlighted("Reply with", "AgentManagerMessageAssistant"), "assistant body stays neutral")
   assert(buffer_contains(buffer, "**Markdown**"), "source formatting is preserved")
-  model.agents["transcript-agent"].provider_options.model = "another-model"
-  model:record_user_input("transcript-agent", "steering text", "steer")
-  model:apply_event({
-    agent_id = "transcript-agent", sequence = 2, provider = "codex",
-    type = "message.delta", payload = { delta = "Another reply" },
+
+  -- Streaming patches touch only the changed rows.
+  local changes = {}
+  vim.api.nvim_buf_attach(buffer, false, {
+    on_lines = function(_, _, _, first, last_old, last_new)
+      changes[#changes + 1] = { first, last_old, last_new }
+    end,
   })
+  assert(model:apply_notification("agent/transcript/patch", {
+    agent_id = "transcript-agent", revision = 3, start = 7, ["end"] = 7,
+    lines = {
+      { text = "steering text", spans = { span(0, 13, "message_user") } },
+      { text = "", spans = {} },
+      { text = "another-model", spans = { span(0, 13, "label_assistant") } },
+      { text = "", spans = {} },
+      { text = "## Ano", spans = { span(0, 6, "heading") } },
+      { text = "\u{2026}", spans = { span(0, 3, "streaming") } },
+      { text = "", spans = {} },
+    },
+  }))
+  assert(model:apply_notification("agent/transcript/patch", {
+    agent_id = "transcript-agent", revision = 4, start = 11, ["end"] = 12,
+    lines = { { text = "## Another reply", spans = { span(0, 16, "heading") } } },
+  }))
   view:render()
-  assert(buffer_has_line(buffer, " ## gpt-6-astra"), "completed responses retain their model")
-  assert(buffer_has_line(buffer, " ## another-model"), "new response uses the new model")
-  assert(not buffer_contains(buffer, "YOU · STEER"), "steering has no YOU heading")
+  assert_equal(#changes, 2, "two patches produce two buffer edits")
+  assert_equal(changes[1], { 10, 10, 17 }, "the first patch appends after the header offset")
+  assert_equal(changes[2], { 14, 15, 15 }, "the streaming delta rewrites one row")
+  assert(buffer_has_line(buffer, " gpt-6-astra"), "completed responses retain their model")
+  assert(buffer_has_line(buffer, " another-model"), "new response uses the new model")
   assert(highlighted("steering text", "AgentManagerMessageUser"), "steering text is purple")
+  assert(highlighted("## Another reply", "AgentManagerMarkdownHeading"), "patched rows are restyled")
+  assert(highlighted("my first line", "AgentManagerMessageUser"), "untouched rows keep their extmarks")
+  assert_equal(#requested, 1, "a continuous patch stream needs no snapshot")
+  view:render()
+  assert_equal(#changes, 2, "an unchanged transcript is not rewritten")
+
+  -- A revision gap falls back to a snapshot request and a full repaint.
+  assert(model:apply_notification("agent/transcript/patch", {
+    agent_id = "transcript-agent", revision = 9, start = 0, ["end"] = 0, lines = {},
+  }))
+  view:render()
+  assert_equal(#requested, 2, "a revision gap requests a fresh snapshot")
+  assert(buffer_has_line(buffer, " ## Another reply"), "the last painted transcript stays until the snapshot lands")
+  assert_equal(#changes, 2, "a stale transcript is not repainted before the snapshot")
   view:teardown()
 
   local plain = View.new(model, {}, { home = vim.fn.tempname(), conversation_markdown = false })
+  assert(model:set_transcript({
+    agent_id = "transcript-agent", revision = 1,
+    lines = {
+      { text = "gpt-6-astra", spans = { span(0, 11, "label_assistant") } },
+      { text = "", spans = {} },
+      { text = "## Heading", spans = { span(0, 10, "heading") } },
+    },
+  }))
   assert(plain:open())
   local plain_buffer = plain.buffers.conversation
-  assert(buffer_has_line(plain_buffer, " ## gpt-6-astra"), "labels stay Markdown headings without rendering")
-  assert(not vim.treesitter.highlighter.active[plain_buffer], "ui.conversation_markdown=false leaves the parser detached")
+  assert(buffer_has_line(plain_buffer, " ## Heading"), "text is verbatim without styling")
+  local plain_marks = vim.api.nvim_buf_get_extmarks(plain_buffer, plain.namespace, { 4, 0 }, { 4, -1 }, { details = true })
+  assert_equal(#plain_marks, 0, "ui.conversation_markdown=false skips Markdown styles")
   assert(not plain:status().markdown.active, "view status reports markdown as inactive")
+  local label_marks = vim.api.nvim_buf_get_extmarks(plain_buffer, plain.namespace, { 3, 0 }, { 3, -1 }, { details = true })
+  assert_equal(label_marks[1][4].hl_group, "AgentManagerMessageAssistant", "speaker labels stay styled without Markdown")
   plain:teardown()
-  model.conversations["transcript-agent"][2].model = vim.NIL
   model.agents["transcript-agent"].capabilities = { { name = "history", available = true, reason = vim.NIL } }
   local nil_view = View.new(model, {}, { home = vim.fn.tempname() })
   assert(nil_view:open())
-  assert(not buffer_contains(nil_view.buffers.conversation, "vim.NIL"), "JSON null does not become a speaker label")
   assert(not buffer_contains(nil_view.buffers.agents, "vim.NIL"), "JSON null does not become a capability note")
   nil_view:teardown()
 end
@@ -1280,9 +1365,9 @@ local function integration_test()
     history = result
   end))
   await("provider history", function()
-    return history ~= nil and manager.status().model.conversations[agent_id][2]
+    local text = transcript_text(manager.status(), agent_id)
+    return history ~= nil and text ~= nil and text:find("historic answer", 1, true) ~= nil
   end)
-  assert_equal(manager.status().model.conversations[agent_id][2].text, "historic answer", "history message")
 
   assert(manager.prompt(agent_id, "second question"))
   await("second active turn", function()
@@ -1300,13 +1385,8 @@ local function integration_test()
   assert_equal(queued_prompt.position, 1, "queued prompt position")
   assert(manager.steer(agent_id, "more detail"))
   await("steering delta", function()
-    local conversation = manager.status().model.conversations[agent_id]
-    for _, message in ipairs(conversation or {}) do
-      if message.text and message.text:find("steered", 1, true) then
-        return true
-      end
-    end
-    return false
+    local text = transcript_text(manager.status(), agent_id)
+    return text ~= nil and text:find("steered", 1, true) ~= nil and text:find("more detail", 1, true) ~= nil
   end)
   assert(manager.interrupt(agent_id))
   await("interrupted state", function()
@@ -1688,8 +1768,8 @@ local function resume_test()
   manager.resume_session_ui(session)
   await("specific resume", function()
     local agent = manager.list()[1]
-    local conversations = manager.status().model.conversations
-    return agent and conversations[agent.id] and conversations[agent.id][2]
+    local text = agent and transcript_text(manager.status(), agent.id)
+    return text ~= nil and text:find("historic answer", 1, true) ~= nil
   end)
   vim.ui.input = original_input
   local resumed = manager.list()[1]
@@ -1700,9 +1780,8 @@ local function resume_test()
   assert_equal(resumed.managed_workspace.task_id, mappings.task_id(session), "automatic session workspace")
   local saved = assert(mappings.load(session))
   assert_equal(saved.task_id, resumed.managed_workspace.task_id, "resume persists the association")
-  assert_equal(
-    manager.status().model.conversations[resumed.id][2].text,
-    "historic answer",
+  assert(
+    transcript_text(manager.status(), resumed.id):find("historic answer", 1, true),
     "resumed history"
   )
   manager.teardown()

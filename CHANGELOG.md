@@ -7,6 +7,23 @@ and releases use Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The broker owns the conversation transcript. Protocol revision 2 adds
+  `agent/transcript` (styled presentation snapshot at a revision) and the
+  `agent/transcript/patch` notification (replace lines `[start, end)`); the
+  broker records dispatched prompts and steering text, projects provider
+  message events, and re-projects `agent/history` results into per-agent
+  transcripts with line-local Markdown styling (headings, fences, code, strong,
+  emphasis, list markers, quotes, links, rules, table borders). The plugin
+  paints patches in place and no longer attaches the treesitter Markdown parser
+  or render-markdown.nvim to the conversation pane, so a streaming delta
+  rewrites one row instead of re-parsing and redrawing the whole transcript.
+  Speaker labels are plain styled lines rather than `##` headings; new
+  `AgentManagerMarkdown*` highlight groups join the presentation catalog.
+  Unchanged directory, help, and decision panes are no longer rewritten on
+  every render. Queued prompts appear in the transcript when they dispatch.
+
 ### Fixed
 
 - Queue Claude sessions set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so

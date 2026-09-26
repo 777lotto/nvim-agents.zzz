@@ -144,6 +144,31 @@ local COMPONENTS = {
       role("message_system", "System Message", "AgentManagerMessageSystem", "Comment", palette.overlay0, {
         italic = true,
       }),
+      role("markdown_heading", "Markdown Heading", "AgentManagerMarkdownHeading", "@markup.heading", palette.lavender, {
+        bold = true,
+      }),
+      role("markdown_fence", "Markdown Fence", "AgentManagerMarkdownFence", "Comment", palette.overlay0),
+      role("markdown_code", "Markdown Code Block", "AgentManagerMarkdownCode", "@markup.raw.block", palette.teal),
+      role("markdown_code_span", "Markdown Code Span", "AgentManagerMarkdownCodeSpan", "@markup.raw", palette.green),
+      role("markdown_strong", "Markdown Strong", "AgentManagerMarkdownStrong", "@markup.strong", palette.text, {
+        bold = true,
+      }),
+      role("markdown_emphasis", "Markdown Emphasis", "AgentManagerMarkdownEmphasis", "@markup.italic", palette.text, {
+        italic = true,
+      }),
+      role("markdown_list_marker", "Markdown List Marker", "AgentManagerMarkdownListMarker", "@markup.list", palette.sky),
+      role("markdown_quote", "Markdown Quote", "AgentManagerMarkdownQuote", "@markup.quote", palette.overlay0, {
+        italic = true,
+      }),
+      role("markdown_link", "Markdown Link", "AgentManagerMarkdownLink", "@markup.link.url", palette.blue),
+      role("markdown_rule", "Markdown Rule", "AgentManagerMarkdownRule", "@punctuation.special", palette.overlay0),
+      role(
+        "markdown_table_border",
+        "Markdown Table Border",
+        "AgentManagerMarkdownTableBorder",
+        "@punctuation.special",
+        palette.overlay0
+      ),
     },
   },
   {

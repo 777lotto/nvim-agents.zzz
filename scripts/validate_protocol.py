@@ -69,6 +69,17 @@ INVALID_CASES: dict[str, tuple[dict[str, Any], ...]] = {
         {"jsonrpc": "2.0", "id": None, "method": "agent/list", "params": {}},
         {
             "jsonrpc": "2.0",
+            "method": "agent/transcript/patch",
+            "params": {
+                "agent_id": "agent-1",
+                "revision": 1,
+                "start": 0,
+                "end": 0,
+                "lines": [{"text": "x", "spans": [{"start": 0, "end": 1, "style": "bold"}]}],
+            },
+        },
+        {
+            "jsonrpc": "2.0",
             "id": 1,
             "result": {},
             "error": {"code": -32603, "message": "both branches are invalid"},

@@ -5,7 +5,7 @@ use serde_json::Value;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 /// Co-shipped client/broker feature floor within public protocol v1.
-pub const PROTOCOL_REVISION: u32 = 1;
+pub const PROTOCOL_REVISION: u32 = 2;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(untagged)]
