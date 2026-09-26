@@ -301,6 +301,7 @@ Directories with sessions anywhere below them sort before directories without
 sessions. Child directory contents begin collapsed. A visible directory's
 direct sessions remain available in a highlighted, independently expandable
 `Sessions` branch even while that directory's subdirectories are collapsed.
+Rows are flat, with Markdown `---` rules separating top-level directory blocks.
 The first five sessions are shown by default; select the group for all, none,
 and five. Historical paths are marked `[past cwd]` and cannot be used to start
 a new session. Sessions are ordered by latest activity across both providers. The
@@ -549,14 +550,14 @@ directory, conversation, workflow detail, approval, and bottom windows to shared
 roles. Foundation/Styling can edit role defaults or individual pane overrides
 without changing Agent Manager's content or actions. The conversation declares
 Markdown content unless `ui.conversation_markdown` is disabled. The directory
-and workflow tree also declare Markdown content. Older Chrome
+and workflow lists also declare Markdown content. Older Chrome
 versions and installations without Chrome retain the native presentation.
 
 ### Shared navigation components
 
 When Chrome provides `ux_chrome.components`, the directory/session tree uses
-shared navigation padding, header colors, and display-cell truncation. Tree
-connectors and hierarchy remain application content. Foundation settings live
+shared navigation padding, header colors, and display-cell truncation. Directory
+and workflow hierarchy remains available through expansion and row actions. Foundation settings live
 under `ux.chrome.components`, with overrides under
 `ux.chrome.component.agent.manager.navigation`. Live edits reformat cached rows
 and retain action maps, cursor position, and provider/status highlight spans.

@@ -203,9 +203,10 @@ The Agents pane is a lazy filesystem tree rooted at the full home directory
 session state. Known managed repositories, broker-owned agents, and active or
 saved standalone Codex/Claude sessions are overlaid beneath their directories.
 Directories containing sessions sort before directories without sessions.
-Directory contents begin collapsed. Each visible directory's direct sessions
-remain indented beneath a highlighted, independently collapsible "Sessions"
-row even while that directory's subdirectories are collapsed. The first five
+Directory contents begin collapsed. Rows are flat, with Markdown --- rules
+between top-level directory blocks. Each visible directory's direct sessions
+remain beneath a highlighted, independently collapsible "Sessions" row even
+while that directory's subdirectories are collapsed. The first five
 sessions appear initially; selecting the group cycles through all, none, and
 five. They are ordered by most recent activity across providers.
 Historical paths carry `[past cwd]`; a new session cannot start there.

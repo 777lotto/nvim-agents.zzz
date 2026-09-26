@@ -1458,7 +1458,7 @@ function View:_render_agents()
     self.directory_path_rows[node.path] = #lines
   end
 
-  local function add_session_row(session, prefix, connector)
+  local function add_session_row(session)
     session = vim.deepcopy(session)
     session.cwd = session_path(session.cwd, self.home)
     local selected = session.managed and session.id == self.model.selected_agent_id and ">" or " "
@@ -1466,7 +1466,7 @@ function View:_render_agents()
     local badge, badge_group = session_badge(session)
     local pending = session.managed and #self.model:pending(session.id) or 0
     local marker = pending > 0 and (" !" .. tostring(pending)) or ""
-    local lead = string.format("%s%s%s ", prefix, connector, selected)
+    local lead = selected == ">" and "> " or ""
     table.insert(lines, string.format(
       "%s%s %s · %s%s",
       lead,
@@ -1494,7 +1494,7 @@ function View:_render_agents()
     end
   end
 
-  local function add_session_group(node, prefix, connector, continues)
+  local function add_session_group(node)
     local sessions_in_group = sorted_sessions(node)
     if #sessions_in_group == 0 then
       return
@@ -1502,10 +1502,9 @@ function View:_render_agents()
     local limit = self.session_group_limits[node.path]
     if limit == nil then limit = 5 end
     local expanded = limit > 0
-    local icon = expanded and "▾ " or "▸ "
     table.insert(
       lines,
-      string.format("%s%s%s**Sessions** (%d%s)", prefix, connector, icon,
+      string.format("*Sessions* (%d%s)",
         #sessions_in_group, limit == 5 and #sessions_in_group > 5 and " · first 5" or "")
     )
     self.session_group_rows[#lines] = { cwd = node.path, repository = node.repository,
@@ -1515,15 +1514,14 @@ function View:_render_agents()
     if not expanded then
       return
     end
-    local child_prefix = prefix .. (continues and "│  " or "   ")
     for index, session in ipairs(sessions_in_group) do
       if index > limit then break end
-      add_session_row(session, child_prefix, index == math.min(#sessions_in_group, limit) and "└─ " or "├─ ")
+      add_session_row(session)
     end
   end
 
   local render_home_node
-  render_home_node = function(node, prefix, exists, filesystem_expanded)
+  render_home_node = function(node, exists, filesystem_expanded)
     local entries, read_error = {}, nil
     if filesystem_expanded and exists ~= false then
       entries, read_error = self:_directory_listing(node.path)
@@ -1554,20 +1552,14 @@ function View:_render_agents()
       table.insert(items, { kind = "error" })
     end
 
-    for index, item in ipairs(items) do
-      local last = index == #items
-      local connector = last and "└─ " or "├─ "
+    for _, item in ipairs(items) do
       if item.kind == "sessions" then
-        add_session_group(node, prefix, connector, not last)
+        add_session_group(node)
       elseif item.kind == "directory" then
         local expanded = self.expanded_directories[item.node.path] == true
-        local icon = expanded and "▾ " or "▸ "
         table.insert(
           lines,
-          prefix
-            .. connector
-            .. icon
-            .. "**" .. markdown_text(item.name)
+          "**" .. markdown_text(item.name)
             .. "/"
             .. "**"
             .. directory_suffix(item.node, item.exists)
@@ -1579,13 +1571,17 @@ function View:_render_agents()
         })
         render_home_node(
           item.node,
-          prefix .. (last and "   " or "│  "),
           item.exists,
           expanded
         )
       else
-        table.insert(lines, prefix .. connector .. "  [directory unreadable]")
+        table.insert(lines, "[directory unreadable]")
         table.insert(highlights, { line = #lines, group = "AgentManagerStatusFailure" })
+      end
+      if node.path == self.home then
+        table.insert(lines, "")
+        table.insert(lines, "---")
+        table.insert(lines, "")
       end
     end
   end
@@ -1599,17 +1595,15 @@ function View:_render_agents()
   local home_expanded = self.expanded_directories[self.home] == true
   table.insert(
     lines,
-    " "
-      .. (home_expanded and "▾ " or "▸ ")
-      .. "**" .. markdown_text(home_label) .. "**"
+    "**" .. markdown_text(home_label) .. "**"
       .. directory_suffix(home_root, true)
   )
   add_directory_row(home_root, true)
   table.insert(highlights, { line = #lines, group = "AgentManagerTitle" })
-  render_home_node(home_root, " ", true, home_expanded)
+  render_home_node(home_root, true, home_expanded)
 
   local render_virtual_node
-  render_virtual_node = function(node, prefix, filesystem_expanded)
+  render_virtual_node = function(node, filesystem_expanded)
     local directories = {}
     if filesystem_expanded then
       for name, child in pairs(node.directories) do
@@ -1623,43 +1617,42 @@ function View:_render_agents()
     for _, name in ipairs(sorted_directory_names(directories)) do
       table.insert(items, { kind = "directory", name = name, node = directories[name].node })
     end
-    for index, item in ipairs(items) do
-      local last = index == #items
-      local connector = last and "└─ " or "├─ "
+    for _, item in ipairs(items) do
       if item.kind == "sessions" then
-        add_session_group(node, prefix, connector, not last)
+        add_session_group(node)
       elseif item.kind == "directory" then
         local expanded = self.expanded_directories[item.node.path] == true
         local stat = vim.uv.fs_stat(item.node.path)
         local exists = stat and stat.type == "directory"
         table.insert(
           lines,
-          prefix
-            .. connector
-            .. (expanded and "▾ " or "▸ ")
-            .. "**" .. markdown_text(item.name) .. "/**"
+          "**" .. markdown_text(item.name) .. "/**"
             .. directory_suffix(item.node, exists)
         )
         add_directory_row(item.node, exists)
         table.insert(highlights, { line = #lines, group = "AgentManagerMuted" })
-        render_virtual_node(item.node, prefix .. (last and "   " or "│  "), expanded)
+        render_virtual_node(item.node, expanded)
       end
     end
   end
 
   for _, root_name in ipairs(sorted_keys(outside)) do
     local root = outside[root_name]
-    table.insert(lines, "")
+    if lines[#lines] ~= "" then table.insert(lines, "") end
+    if lines[#lines - 1] ~= "---" then
+      table.insert(lines, "---")
+      table.insert(lines, "")
+    end
     local expanded = self.expanded_directories[root.path] == true
     local root_stat = vim.uv.fs_stat(root.path)
     local exists = root_stat and root_stat.type == "directory"
     table.insert(
       lines,
-      " " .. (expanded and "▾ " or "▸ ") .. "**" .. markdown_text(root_name) .. "**" .. directory_suffix(root, exists)
+      "**" .. markdown_text(root_name) .. "**" .. directory_suffix(root, exists)
     )
     add_directory_row(root, exists)
     table.insert(highlights, { line = #lines, group = "AgentManagerTitle" })
-    render_virtual_node(root, " ", expanded)
+    render_virtual_node(root, expanded)
   end
 
   table.insert(lines, "")
