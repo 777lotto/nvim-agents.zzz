@@ -1242,6 +1242,26 @@ release, runs the packaged installer through Lazy's build lifecycle, and keeps
 embedded mode as the portable default; durable mode remains a host-lifecycle
 opt-in.
 
+### M6: operator decisions
+
+- Add an additive `decisions` list to the queue stage result so a session can
+  record a human decision and continue; never a live question or approval
+  callback in an unattended session.
+- Let the queue own one bounded record per decision beside the task's
+  attempts, journal every transition, park only blocking decisions in a
+  `decision` status, and inject the thread into later fresh sessions.
+- Project decisions, pending counts and ready operator gates through
+  `inspect`; forward attended `decide` and `ask` actions to the launcher as
+  argv with the process user as identity.
+- Add a Decisions pane, per-item notification and a statusline count to the
+  Workflows view; selecting a decision pins its record and the originating
+  transcript.
+
+Design status: accepted on 2026-09-26; see
+[M6 operator decisions](architecture/m6-operator-decisions.md). The workflow
+contract in `protocol/workflow/v1/decision.schema.json` is validated by
+`mise run verify`; runtime slices are not yet implemented.
+
 ## Acceptance criteria
 
 The first production release is complete when:

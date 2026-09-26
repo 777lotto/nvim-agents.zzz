@@ -16,8 +16,55 @@ CONTRACTS = (
         ROOT / "protocol/claude-worker/v1/worker.schema.json",
         ROOT / "protocol/claude-worker/v1/fixtures",
     ),
+    (
+        ROOT / "protocol/workflow/v1/decision.schema.json",
+        ROOT / "protocol/workflow/v1/fixtures",
+    ),
 )
+# Document schemas have no root message: each fixture and rejection case names
+# its definition by the file-name prefix before the first dot.
+DOCUMENT_SCHEMAS = {"decision.schema.json"}
 INVALID_CASES: dict[str, tuple[dict[str, Any], ...]] = {
+    "decision.schema.json": (
+        {
+            "$def": "decision-request",
+            "key": "graph-rpc-owner",
+            "title": "Missing blocking flag",
+            "question": "Which engine owns the RPC?",
+        },
+        {
+            "$def": "decision-request",
+            "key": "graph-rpc-owner",
+            "blocking": True,
+            "title": "Bad option id",
+            "question": "Which engine owns the RPC?",
+            "options": [{"id": "Direct call", "label": "serving-rs calls graph-rs"}],
+        },
+        {
+            "$def": "thread-entry",
+            "at": "2026-09-26T13:10:03Z",
+            "author": {"kind": "operator"},
+            "kind": "answer",
+            "text": "identity is required for an operator entry",
+        },
+        {
+            "$def": "operator-input",
+            "version": 1,
+            "action": "decide",
+            "identity": "ai",
+            "text": "input files never carry an identity claim",
+        },
+        {
+            "$def": "stage-result",
+            "outcome": "ready",
+            "summary": "nine decisions exceed the bound",
+            "findings": [],
+            "evidence": [],
+            "decisions": [
+                {"key": f"k{i}", "blocking": False, "title": "t", "question": "q"} for i in range(9)
+            ],
+        },
+    ),
     "broker.schema.json": (
         {"jsonrpc": "2.0", "id": None, "method": "agent/list", "params": {}},
         {
@@ -135,17 +182,31 @@ def load_json(path: Path) -> Any:  # noqa: ANN401
         return json.load(handle)
 
 
+def definition_validator(schema: dict[str, Any], definition: str) -> Draft202012Validator:
+    if definition not in schema["$defs"]:
+        raise AssertionError(f"unknown definition {definition}")
+    return Draft202012Validator(
+        {**schema, "$ref": f"#/$defs/{definition}"}, format_checker=FormatChecker()
+    )
+
+
 def main() -> None:
     checked = 0
     rejected = 0
     for schema_path, fixtures_path in CONTRACTS:
         schema = load_json(schema_path)
         Draft202012Validator.check_schema(schema)
+        document = schema_path.name in DOCUMENT_SCHEMAS
         validator = Draft202012Validator(schema, format_checker=FormatChecker())
         for fixture_path in sorted(fixtures_path.glob("*.json")):
+            if document:
+                validator = definition_validator(schema, fixture_path.name.split(".", 1)[0])
             validator.validate(load_json(fixture_path))
             checked += 1
         for invalid in INVALID_CASES[schema_path.name]:
+            if document:
+                invalid = dict(invalid)
+                validator = definition_validator(schema, str(invalid.pop("$def")))
             if validator.is_valid(invalid):
                 raise AssertionError(f"{schema_path.name} accepted a known-invalid message")
             rejected += 1

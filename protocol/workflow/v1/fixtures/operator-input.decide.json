@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "action": "decide",
+  "option": "state",
+  "text": "Route through the state engine. Add the typed contracts-rs row in the same PR."
+}

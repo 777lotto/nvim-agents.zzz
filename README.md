@@ -406,7 +406,10 @@ acceptance evidence. See
 for the compatibility lock, reproducible artifact, provenance, resumable
 installation, CI policy, and production configuration. See
 [external CLI session discovery](docs/architecture/external-cli-session-discovery.md)
-for the cross-process activity checks and read-only ownership boundary.
+for the cross-process activity checks and read-only ownership boundary. See
+[M6 operator decisions](docs/architecture/m6-operator-decisions.md) for the
+accepted design of decision records, attended answers, follow-up sessions,
+and the Workflows Decisions pane.
 
 ## UX integration
 

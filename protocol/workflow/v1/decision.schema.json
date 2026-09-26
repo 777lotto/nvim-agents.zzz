@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-manager.nvimz/protocol/workflow/v1/decision.schema.json",
+  "title": "Agent Manager workflow operator decisions v1",
+  "description": "Additive workflow-boundary documents for operator decisions: the request a stage result carries, the record the queue owns, and the input an attended control action forwards. Fixtures select a definition by file-name prefix.",
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "key": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "maxLength": 64
+    },
+    "decisionId": {
+      "type": "string",
+      "pattern": "^decision-[0-9]{3,4}$"
+    },
+    "attempt": {
+      "type": "string",
+      "pattern": "^session-[0-9]{3,4}-(?:implement|review|repair|answer)$"
+    },
+    "stage": {
+      "enum": [
+        "implement",
+        "review",
+        "repair"
+      ]
+    },
+    "provider": {
+      "enum": [
+        "codex",
+        "claude"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "optionId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]{1,16}$"
+    },
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/optionId"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "consequence": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "decision-request": {
+      "type": "object",
+      "required": [
+        "key",
+        "blocking",
+        "title",
+        "question"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "context": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/option"
+          }
+        },
+        "recommendation": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/optionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "description": "One entry of a stage result's additive `decisions` list. The queue assigns the record id."
+    },
+    "stage-result": {
+      "description": "The existing queue stage result with the additive `decisions` list.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "summary",
+        "findings",
+        "evidence"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "ready",
+            "accept",
+            "changes",
+            "blocked"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 16000
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "decisions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/decision-request"
+          }
+        }
+      }
+    },
+    "operator-author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "identity"
+      ],
+      "properties": {
+        "kind": {
+          "const": "operator"
+        },
+        "identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "agent-author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "attempt",
+        "provider",
+        "model"
+      ],
+      "properties": {
+        "kind": {
+          "const": "agent"
+        },
+        "attempt": {
+          "$ref": "#/$defs/attempt"
+        },
+        "provider": {
+          "$ref": "#/$defs/provider"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "thread-entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "author",
+        "kind",
+        "text"
+      ],
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "author": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/operator-author"
+            },
+            {
+              "$ref": "#/$defs/agent-author"
+            }
+          ]
+        },
+        "kind": {
+          "enum": [
+            "answer",
+            "question",
+            "reply",
+            "note"
+          ]
+        },
+        "option": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/optionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "identity",
+        "option",
+        "text"
+      ],
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "identity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "option": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/optionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        }
+      }
+    },
+    "decision-record": {
+      "description": "The queue-owned file tasks/<task>/decisions/<id>.json.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "id",
+        "key",
+        "repository",
+        "program",
+        "task",
+        "attempt",
+        "stage",
+        "provider",
+        "model",
+        "requested_at",
+        "updated_at",
+        "blocking",
+        "title",
+        "question",
+        "context",
+        "options",
+        "recommendation",
+        "status",
+        "superseded_by",
+        "thread",
+        "answer"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "id": {
+          "$ref": "#/$defs/decisionId"
+        },
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "repository": {
+          "$ref": "#/$defs/slug"
+        },
+        "program": {
+          "$ref": "#/$defs/slug"
+        },
+        "task": {
+          "$ref": "#/$defs/slug"
+        },
+        "attempt": {
+          "$ref": "#/$defs/attempt"
+        },
+        "stage": {
+          "$ref": "#/$defs/stage"
+        },
+        "provider": {
+          "$ref": "#/$defs/provider"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "requested_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "context": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "options": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/option"
+          }
+        },
+        "recommendation": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/optionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "answered",
+            "withdrawn",
+            "superseded"
+          ]
+        },
+        "superseded_by": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/decisionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thread": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/thread-entry"
+          }
+        },
+        "answer": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/answer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "operator-input": {
+      "description": "The bounded file an attended control action forwards. It never carries an identity; the launcher records the process user.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "action",
+        "text"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "action": {
+          "enum": [
+            "decide",
+            "ask"
+          ]
+        },
+        "option": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/optionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        }
+      }
+    }
+  }
+}
