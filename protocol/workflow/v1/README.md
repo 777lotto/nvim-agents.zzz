@@ -69,19 +69,27 @@ The scheduler supplies delegation limits and retains task/worktree ownership.
 Provider changes always start fresh sessions and never reuse another provider's
 conversation identity or live agents.
 
-A confirmed five-hour rejection exits nonzero with
-`error {code:"session_limit",message,quota:{provider,window_seconds:18000,resets_at}}`.
+A confirmed subscription-window rejection exits nonzero with
+`error {code:"session_limit",message,quota:{provider,window_seconds,resets_at}}`.
+`window_seconds` is `18000` (five-hour window) or `604800` (weekly window);
 `resets_at` is an integer Unix timestamp, strictly in the future and at most
-five hours plus one minute away. Only these allowlisted fields survive redaction.
-Claude requires a rejected `RateLimitEvent` explicitly naming `five_hour`.
-Codex requires a terminal `rateLimitExceeded` error plus a fresh
-`account/rateLimits/read` snapshot for the Codex bucket with an exhausted
-300-minute window. Other exhausted windows or spend controls prevent classification.
-The pinned Python SDK exposes this read through its typed transport; no account
-credentials or raw exception text are forwarded. Warnings, missing/expired reset
-values, weekly limits, overload, authentication failures and bare 429s remain
-ordinary redacted failures. The worker does not switch providers, schedule
-retries, purchase credits or redeem resets; those decisions belong to the queue.
+the window plus one minute away. Only these allowlisted fields survive redaction.
+Claude requires a rejected `RateLimitEvent` explicitly naming `five_hour` or
+`seven_day`; model-specific weekly buckets and overage never switch. Codex
+requires a terminal `usageLimitExceeded` (plan exhaustion, either window) or
+`rateLimitExceeded` error plus a fresh `account/rateLimits/read` snapshot whose
+metered `codex` bucket (the single-bucket view, or `rateLimitsByLimitId.codex`
+once the view has switched to credits) has an exhausted 300- or 10080-minute
+window; the latest reset among exhausted windows is reported. Other window
+lengths, spend controls and out-of-range resets prevent classification. When
+Codex has given its typed `usageLimitExceeded` verdict but no metered bucket is
+readable, the worker reports the five-hour window from now as a floor so the
+queue re-probes the provider later instead of blocking the task. The pinned
+Python SDK exposes this read through its typed transport; no account
+credentials or raw exception text are forwarded. Warnings, missing/expired
+reset values, overload, authentication failures and bare 429s remain ordinary
+redacted failures. The worker does not switch providers, schedule retries,
+purchase credits or redeem resets; those decisions belong to the queue.
 
 ## Operator decisions (additive, design accepted 2026-09-26)
 

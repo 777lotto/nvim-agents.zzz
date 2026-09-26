@@ -20,7 +20,11 @@ from claude_agent_sdk import (
 )
 from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 from openai_codex.errors import JsonRpcError
-from openai_codex.generated.v2_all import GetAccountRateLimitsResponse, ReasoningEffort
+from openai_codex.generated.v2_all import (
+    GetAccountRateLimitsResponse,
+    RateLimitSnapshot,
+    ReasoningEffort,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Emit = Callable[[dict[str, Any]], None]
@@ -62,38 +66,94 @@ class ExecutionRequest(BaseModel):
         return self
 
 
+# Subscription windows the queue may record as provider cooldowns, keyed by the
+# provider's own window name (Claude) or window length in minutes (Codex).
+# Anything else stays an ordinary redacted failure.
+QUOTA_WINDOWS: dict[str, int] = {"five_hour": 18000, "seven_day": 604800}
+FIVE_HOUR = QUOTA_WINDOWS["five_hour"]
+CODEX_WINDOW_MINUTES: dict[int, int] = {300: FIVE_HOUR, 10080: QUOTA_WINDOWS["seven_day"]}
+# Codex reports plan exhaustion, five-hour or weekly, as `usageLimitExceeded`.
+# `rateLimitExceeded` is accepted only with a snapshot naming the window.
+CODEX_LIMIT_ERRORS = frozenset({"usageLimitExceeded", "rateLimitExceeded"})
+
+
 class SessionLimit(RuntimeError):
     """Only allowlisted metadata crosses the worker's redaction boundary."""
 
-    def __init__(self, provider: Literal["codex", "claude"], resets_at: int):
-        super().__init__("Five-hour subscription window exhausted")
+    def __init__(
+        self,
+        provider: Literal["codex", "claude"],
+        resets_at: int,
+        window_seconds: int = FIVE_HOUR,
+    ):
+        super().__init__("Subscription window exhausted")
         self.provider = provider
         self.resets_at = resets_at
+        self.window_seconds = window_seconds
 
     def frame(self) -> dict[str, Any]:
         return {
             "type": "error",
             "code": "session_limit",
-            "message": "Five-hour subscription window exhausted",
+            "message": "Subscription window exhausted",
             "quota": {
                 "provider": self.provider,
-                "window_seconds": 18000,
+                "window_seconds": self.window_seconds,
                 "resets_at": self.resets_at,
             },
         }
 
 
-def valid_reset(value: Any) -> bool:
-    return type(value) is int and time.time() < value <= time.time() + 18060
+def valid_reset(value: Any, window_seconds: int = FIVE_HOUR) -> bool:
+    return type(value) is int and time.time() < value <= time.time() + window_seconds + 60
+
+
+def codex_bucket(response: GetAccountRateLimitsResponse) -> RateLimitSnapshot | None:
+    # The metered `codex` bucket carries the plan windows even after the
+    # single-bucket view has switched to the credits bucket on exhaustion.
+    raw = (response.rate_limits_by_limit_id or {}).get("codex")
+    if isinstance(raw, dict):
+        with contextlib.suppress(ValueError):
+            return RateLimitSnapshot.model_validate(raw)
+    snapshot = response.rate_limits
+    return snapshot if snapshot.limit_id in {None, "codex"} else None
+
+
+def exhausted_window(snapshot: RateLimitSnapshot) -> tuple[int, int] | None:
+    # The latest reset among exhausted windows of a known length whose reset
+    # lies inside that window; other windows carry no usable evidence.
+    exhausted: list[tuple[int, int]] = []
+    for window in (snapshot.primary, snapshot.secondary):
+        if window is None or window.used_percent < 100:
+            continue
+        minutes = window.window_duration_mins
+        if minutes is None or minutes not in CODEX_WINDOW_MINUTES:
+            continue
+        seconds = CODEX_WINDOW_MINUTES[minutes]
+        if not valid_reset(window.resets_at, seconds):
+            continue
+        assert window.resets_at is not None
+        exhausted.append((window.resets_at, seconds))
+    return max(exhausted) if exhausted else None
 
 
 async def codex_session_limit(codex: AsyncCodex, error: Any) -> SessionLimit | None:
-    # A terminal typed error AND a fresh account snapshot are both required.
-    # Bare 429s, message text, weekly limits and unrelated buckets are insufficient.
-    if not isinstance(error, dict):
+    # A terminal typed limit error is required. A fresh account snapshot names
+    # the exhausted window and its reset; this account meters only a weekly
+    # window, so five-hour and weekly windows are both recognised. Bare 429s,
+    # message text and unrelated buckets are insufficient. Codex's typed
+    # usage-limit verdict is authoritative for exhaustion itself: when no
+    # snapshot names the window, the five-hour window is reported as a floor
+    # so the queue re-probes instead of blocking the task on a generic
+    # failure. A spend control is not a timed window and never cools down.
+    code = cast(dict[str, Any], error).get("codexErrorInfo") if isinstance(error, dict) else None
+    if not isinstance(code, str) or code not in CODEX_LIMIT_ERRORS:
         return None
-    if cast(dict[str, Any], error).get("codexErrorInfo") != "rateLimitExceeded":
-        return None
+    floor = (
+        SessionLimit("codex", int(time.time()) + FIVE_HOUR)
+        if code == "usageLimitExceeded"
+        else None
+    )
     try:
         # SDK 0.155.1 has no high-level rate-limits method. Use its typed
         # transport on the same authenticated app-server, never a second login.
@@ -101,19 +161,15 @@ async def codex_session_limit(codex: AsyncCodex, error: Any) -> SessionLimit | N
             "account/rateLimits/read", None, response_model=GetAccountRateLimitsResponse
         )
     except Exception:
+        return floor
+    snapshot = codex_bucket(response)
+    if snapshot is not None and snapshot.spend_control_reached:
         return None
-    snapshot = response.rate_limits
-    if snapshot.limit_id not in {None, "codex"} or snapshot.spend_control_reached:
-        return None
-    exhausted: list[int] = []
-    for window in (snapshot.primary, snapshot.secondary):
-        if window is None or window.used_percent < 100:
-            continue
-        if window.window_duration_mins != 300 or not valid_reset(window.resets_at):
-            return None
-        assert window.resets_at is not None
-        exhausted.append(window.resets_at)
-    return SessionLimit("codex", max(exhausted)) if exhausted else None
+    window = exhausted_window(snapshot) if snapshot is not None else None
+    if window is None:
+        return floor
+    resets_at, seconds = window
+    return SessionLimit("codex", resets_at, seconds)
 
 
 async def check_codex_limit(codex: AsyncCodex, error: Any) -> None:
@@ -276,15 +332,16 @@ async def run_claude(request: ExecutionRequest, emit: Emit) -> None:
             async for message in client.receive_response():
                 if isinstance(message, RateLimitEvent):
                     info = message.rate_limit_info
+                    window = QUOTA_WINDOWS.get(info.rate_limit_type or "")
                     if (
                         info.status == "rejected"
-                        and info.rate_limit_type == "five_hour"
-                        and valid_reset(info.resets_at)
+                        and window is not None
+                        and valid_reset(info.resets_at, window)
                     ):
                         assert info.resets_at is not None
                         with contextlib.suppress(Exception):
                             await client.interrupt()
-                        raise SessionLimit("claude", info.resets_at)
+                        raise SessionLimit("claude", info.resets_at, window)
                 if isinstance(message, SystemMessage) and message.subtype == "init":
                     emit(
                         {
