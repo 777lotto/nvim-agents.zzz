@@ -21,6 +21,11 @@ and releases use Semantic Versioning.
   refused) instead of whichever CPython is first on `PATH`.
 ### Added
 
+- M6 operator decisions design register
+  (`docs/architecture/m6-operator-decisions.md`) and the additive workflow
+  contract `protocol/workflow/v1/decision.schema.json` with fixtures and
+  rejection cases validated by `mise run verify`. Design only: no runtime
+  behavior changes.
 - Optional Chrome navigation components share directory/session padding,
   header colors, and display-cell truncation. Live Foundation edits reformat
   cached rows while retaining action targets and provider/status highlights.

@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "action": "ask",
+  "text": "Does routing through state add a round trip on the hot path, or only at activation?"
+}

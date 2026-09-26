@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "decision-001",
+  "key": "graph-rpc-owner",
+  "repository": "zemrip",
+  "program": "rust-program",
+  "task": "rust-r14-d46834dde",
+  "attempt": "session-010-repair",
+  "stage": "repair",
+  "provider": "claude",
+  "model": "claude-opus-5-5",
+  "requested_at": "2026-09-26T03:40:12Z",
+  "updated_at": "2026-09-26T03:40:12Z",
+  "blocking": false,
+  "title": "Which engine owns the authenticated graph RPC?",
+  "question": "The three-tier read needs an authenticated RPC to activate graph artifacts. The R9 register names graph-rs as the artifact owner but does not say whether serving-rs calls it directly or through the state engine's dispatch table.",
+  "context": [
+    "packages/serving-rs/src/discovery.rs:384",
+    "docs/artifacts/RUST-R9-GRAPH-WRITE-AND-SERVING.md: artifact activation section"
+  ],
+  "options": [
+    { "id": "direct", "label": "serving-rs calls graph-rs directly", "consequence": "One fewer hop; serving holds a graph credential." },
+    { "id": "state", "label": "Route through the state engine dispatch table", "consequence": "Matches the R3 manifest; adds a typed row to contracts-rs." }
+  ],
+  "recommendation": "state",
+  "status": "pending",
+  "superseded_by": null,
+  "thread": [],
+  "answer": null
+}

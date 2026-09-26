@@ -82,3 +82,30 @@ credentials or raw exception text are forwarded. Warnings, missing/expired reset
 values, weekly limits, overload, authentication failures and bare 429s remain
 ordinary redacted failures. The worker does not switch providers, schedule
 retries, purchase credits or redeem resets; those decisions belong to the queue.
+
+## Operator decisions (additive, design accepted 2026-09-26)
+
+[`decision.schema.json`](decision.schema.json) defines the documents of the
+operator-decision flow described in
+[M6 operator decisions](../../../docs/architecture/m6-operator-decisions.md).
+It is a document schema, not a JSON-RPC message schema: each fixture and
+rejection case selects its definition by the file-name prefix before the first
+dot (`stage-result.*`, `decision-record.*`, `operator-input.*`). No runtime
+consumes these definitions yet; the queue writer, the `inspect`/control
+projection and the Neovim pane land as separate slices against this contract.
+
+- `stage-result` is the existing result object plus an optional `decisions`
+  list of at most eight `decision-request` entries (`key`, `blocking`,
+  `title`, `question`, optional `context`, `options`, `recommendation`).
+  A session records a decision and continues; it never waits for the answer.
+- `decision-record` is the queue-owned file `tasks/<task>/decisions/<id>.json`.
+  Ids are queue-assigned and sequential per task; `key` is the model's stable
+  slug, and raising it again updates the open record. `thread` entries are
+  authored by an operator (`identity`, the launcher's process user) or an
+  agent `answer` attempt. `answer` mirrors the last operator answer.
+- `operator-input` is the bounded file an attended `decide` or `ask` control
+  action forwards to `zemrip-agent-workspace queue-decision`. It carries no
+  identity; the launcher records the process user and requires a terminal.
+- `inspect` will add `decisions` to each task and `pending_decisions` plus
+  `receipts_due` to each program; the attempt pattern gains `answer`. These
+  fields are additive and absent until the queue writes records.
