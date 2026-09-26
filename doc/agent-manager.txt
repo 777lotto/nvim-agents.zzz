@@ -239,10 +239,10 @@ their original directory without lifecycle inventory when no managed association
 exists. This Codex-only resume is permitted with shared-checkout starts disabled;
 Git checkouts, the managed worktree namespace, and new starts retain that policy.
 
-The key at the top maps `● Codex` and `◆ Claude` plus `● active`, `○ resume`,
-`? check`, and `× ended` to their semantic colors. Session rows show only the
-two symbols and title. Active external rows remain read-only while the
-originating terminal owns them. The tree is refreshed when the workspace opens
+The `·` on each session row is blue for Codex and orange for Claude. Session
+titles are green when active, regular when resumable, black when ended, and
+yellow when activity cannot be checked. Active external rows remain read-only
+while the originating terminal owns them. The tree is refreshed when the workspace opens
 and with `gr`. Set `ui.external_sessions` to false to hide external CLI
 sessions; `ui.external_session_limit` caps each provider query from 1 to 1000.
 

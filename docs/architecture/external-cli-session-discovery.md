@@ -46,9 +46,9 @@ closed when ownership is unknown. Codex delegates to App Server
 path removes the worktree, branch, or project files.
 
 The Agents pane overlays both collections on a filesystem hierarchy rooted at
-the user's full home path. Its key maps provider and state symbols to semantic
-colors; each session row keeps only those two symbols and its title. Opening the
-pane and pressing `gr` perform metadata-only session refreshes, do not run the
+the user's full home path. Each session row uses a colored `·` for the provider
+and title color for status. Opening the pane and pressing `gr` perform
+metadata-only session refreshes, do not run the
 lifecycle authority's repository-wide audit, and do not start a paid model
 turn. Provider prompt previews, transcript messages, arbitrary CLI JSON fields,
 and tool payloads are discarded before they reach the public broker protocol.

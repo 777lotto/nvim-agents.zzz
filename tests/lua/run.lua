@@ -46,6 +46,17 @@ local function buffer_line_number(buffer, needle)
   return nil
 end
 
+local function highlight_span(buffer, namespace, needle, group)
+  local row = assert(buffer_line_number(buffer, needle), "missing row " .. needle) - 1
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buffer, namespace,
+    { row, 0 }, { row, -1 }, { details = true })) do
+    if mark[4].hl_group == group then
+      return mark[3], mark[4].end_col
+    end
+  end
+  return nil
+end
+
 local function pure_client_resync_test()
   local Client = require("agent_manager.client")
   local observed_resync = nil
@@ -264,7 +275,7 @@ local function directory_markdown_and_bottom_test()
   assert(vim.treesitter.highlighter.active[buffer], "directory Markdown parser")
   assert(buffer_contains(buffer, "*Sessions* (7 · first 5)"), "initial session limit")
   assert(buffer_has_line(buffer, "*Sessions* (7 · first 5)"), "flat session group")
-  assert(buffer_has_line(buffer, "● ○ · session 7"), "flat session row")
+  assert(buffer_has_line(buffer, "· session 7"), "flat session row")
   assert(buffer_has_line(buffer, "---"), "Markdown directory separator")
   assert(buffer_contains(buffer, "session 3") and not buffer_contains(buffer, "session 2"), "only newest five")
   assert(not buffer_contains(buffer, "note.txt"), "files stay hidden")
@@ -406,10 +417,12 @@ local function workspace_view_navigation_test()
   assert(buffer_contains(status.buffers.agents, "notes/"), "unrelated home directory")
   assert(not buffer_contains(status.buffers.agents, "README.txt"), "directory omits files")
   assert(not buffer_contains(status.buffers.agents, "(unknown)"), "blank session cwd uses home")
-  assert(buffer_contains(status.buffers.agents, "key · ● Codex · ◆ Claude"), "provider legend")
-  assert(buffer_contains(status.buffers.agents, "● active · ○ resume"), "live-state legend")
-  assert(buffer_contains(status.buffers.agents, "? check · × ended"), "inactive-state legend")
-  assert(buffer_contains(status.buffers.agents, "● ○ · home codex fixture"), "compact Codex row")
+  assert(not buffer_contains(status.buffers.agents, "key ·"), "session legend removed")
+  assert(buffer_contains(status.buffers.agents, "· home codex fixture"), "compact Codex row")
+  assert(highlight_span(status.buffers.agents, view.namespace, "home codex fixture",
+    "AgentManagerProviderCodex"), "Codex provider dot is blue")
+  assert(not highlight_span(status.buffers.agents, view.namespace, "home codex fixture",
+    "AgentManagerStatusSuccess"), "resumable title uses regular text")
   assert(
     not buffer_contains(status.buffers.agents, "· claude fixture"),
     "nested sessions start collapsed"
@@ -443,7 +456,7 @@ local function workspace_view_navigation_test()
     return buffer_contains(status.buffers.agents, "agent-manager/**  [repo]")
   end), "projects directory expansion")
   assert(
-    buffer_contains(status.buffers.agents, "◆ ● · claude fixture"),
+    buffer_contains(status.buffers.agents, "· claude fixture"),
     "directory sessions ignore file collapse"
   )
   assert(buffer_contains(status.buffers.agents, "*Sessions* (3)"), "dedicated session group")
@@ -461,7 +474,11 @@ local function workspace_view_navigation_test()
     return not buffer_contains(status.buffers.agents, "project.txt")
   end), "directory file collapse")
   assert(buffer_contains(status.buffers.agents, "*Sessions* (3)"), "session group survives file collapse")
-  assert(buffer_contains(status.buffers.agents, "◆ ● · claude fixture"), "session rows survive file collapse")
+  assert(buffer_contains(status.buffers.agents, "· claude fixture"), "session rows survive file collapse")
+  assert(highlight_span(status.buffers.agents, view.namespace, "claude fixture",
+    "AgentManagerProviderClaude"), "Claude provider dot is orange")
+  assert(highlight_span(status.buffers.agents, view.namespace, "claude fixture",
+    "AgentManagerStatusSuccess"), "active title is green")
   local session_group_row = assert(buffer_line_number(status.buffers.agents, "*Sessions* (3)"))
   vim.api.nvim_win_set_cursor(0, { session_group_row, 0 })
   vim.api.nvim_feedkeys(vim.keycode("<CR>"), "x", false)
@@ -494,6 +511,12 @@ local function workspace_view_navigation_test()
   vim.api.nvim_win_set_cursor(0, { saved_row, 0 })
   vim.api.nvim_feedkeys(vim.keycode("<CR>"), "x", false)
   assert_equal(resumed_session.provider_session_id, "codex-saved-view", "saved row resume action")
+  model:apply_state({ { id = "agent-ended", provider = "codex", cwd = repository,
+    title = "ended fixture", state = "failed", capabilities = {} } })
+  view:render()
+  assert(buffer_contains(status.buffers.agents, "· ended fixture"), "ended session row")
+  assert(highlight_span(status.buffers.agents, view.namespace, "ended fixture",
+    "AgentManagerSessionEnded"), "ended title is black")
   view:teardown()
   vim.fn.delete(home, "rf")
 end
@@ -1084,8 +1107,8 @@ local function integration_test()
   expand_tree("alpha/", "api/")
   expand_tree("api/", "Codex terminal session")
   expand_tree("web/", "Claude terminal session")
-  assert(buffer_contains(agents_buffer, "● ● · Codex terminal session"), "active external symbols")
-  assert(buffer_contains(agents_buffer, "● ○ · codex resumable fixture"), "resumable external symbols")
+  assert(buffer_contains(agents_buffer, "· Codex terminal session"), "active external session")
+  assert(buffer_contains(agents_buffer, "· codex resumable fixture"), "resumable external session")
   assert(
     buffer_contains(agents_buffer, "sn new · so open · am model · ae effort"),
     "session action note"

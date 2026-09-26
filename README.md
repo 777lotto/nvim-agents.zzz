@@ -305,10 +305,10 @@ Rows are flat, with Markdown `---` rules separating top-level directory blocks.
 The first five sessions are shown by default; select the group for all, none,
 and five. Historical paths are marked `[past cwd]` and cannot be used to start
 a new session. Sessions are ordered by latest activity across both providers. The
-key at the top maps provider symbols (`● Codex`, `◆ Claude`) and state symbols
-(`● active`, `○ resume`, `? check`, `× ended`) to their semantic colors. Each
-session row contains only its two colored symbols and title. A resumable session
-has no live writer; focus it and press `<CR>` or `so` to continue it. The check
+colored `·` on each session row identifies Codex (blue) or Claude (orange).
+The session title is green when active, regular when resumable, black when ended,
+and yellow when activity cannot be checked. A resumable session has no live
+writer; focus it and press `<CR>` or `so` to continue it. The check
 state means activity could not be verified, so Agent Manager will not risk
 opening a second writer. Sessions are discovered across the AI container when
 the workspace opens and whenever `gr` refreshes the view. Set
