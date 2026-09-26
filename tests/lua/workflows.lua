@@ -26,7 +26,9 @@ return function()
               cached_input_tokens = 900 } },
         } },
       { id = "next", milestone = "R0", goal = "Upcoming work", status = "pending", attempts = {} },
-      { id = "ungrouped", milestone = vim.NIL, goal = "Ungrouped work", status = "blocked", attempts = {} },
+      { id = "ungrouped", milestone = vim.NIL, goal = "Ungrouped work", status = "blocked", attempts = {
+        { id = "session-blocked", session_id = "blocked-session", provider = "codex", outcome = "blocked" },
+      } },
     } },
     { repository = "second", program = "refactor", control = {}, tasks = {} },
   }, errors = {} }
@@ -57,6 +59,18 @@ return function()
   local function text(name)
     return table.concat(vim.api.nvim_buf_get_lines(workflows.buffers[name or "checklist"], 0, -1, false), "\n")
       :gsub("%*", "")
+  end
+  local function span(needle, group)
+    local buffer = workflows.buffers.checklist
+    for row, line in ipairs(vim.api.nvim_buf_get_lines(buffer, 0, -1, false)) do
+      if line:find(needle, 1, true) then
+        for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buffer, view.namespace,
+          { row - 1, 0 }, { row - 1, -1 }, { details = true })) do
+          if mark[4].hl_group == group then return mark[3], mark[4].end_col end
+        end
+      end
+    end
+    return nil
   end
   local function focus(kind, id)
     vim.api.nvim_set_current_win(workflows.windows.checklist)
@@ -96,6 +110,8 @@ return function()
     assert(not text():find("session-001", 1, true))
     select("task", "done")
     assert(text():find("transcript identity unavailable", 1, true))
+    assert(text():find("· session-001-implement · transcript identity unavailable", 1, true))
+    assert(span("transcript identity unavailable", "AgentManagerSessionEnded"), "ended workflow text is black")
     assert(text("detail"):find("PR #42", 1, true))
     assert(text("detail"):find("Completed work", 1, true))
     assert(not text("detail"):find("vim.NIL", 1, true))
@@ -108,6 +124,9 @@ return function()
     select("phase", "demo/refactor/phase/R1")
     assert(not text():find("live-session", 1, true))
     select("task", "active")
+    assert(text():find("· session-001-implement · live-session", 1, true))
+    assert(span("live-session", "AgentManagerProviderClaude"), "workflow Claude dot is orange")
+    assert(span("live-session", "AgentManagerStatusSuccess"), "active workflow text is green")
     assert(text("detail"):find("Live session output", 1, true))
     assert(not text("detail"):find("PR #", 1, true))
     assert(not text():find("vim.NIL", 1, true))
@@ -147,6 +166,11 @@ return function()
     workflows:refresh()
     settle()
     assert(not text():find("Running work", 1, true))
+    select("phase", "demo/refactor/phase/")
+    select("task", "ungrouped")
+    assert(text():find("· session-blocked · blocked-session", 1, true))
+    assert(span("blocked-session", "AgentManagerProviderCodex"), "workflow Codex dot is blue")
+    assert(span("blocked-session", "AgentManagerStatusFailure"), "blocked workflow text is red")
     -- Refreshing counts or inserting rows keeps focus on the same tree identity.
     focus("program", "second/refactor")
     snapshot.programs[1].tasks[3].status = "satisfied"

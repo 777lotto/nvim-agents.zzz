@@ -32,18 +32,6 @@ local function markdown_text(value)
   return inline(value):gsub("([\\`*_%[%]<>])", "\\%1")
 end
 
-local function add_phrase_highlight(highlights, line_number, line, phrase, group)
-  local start = line:find(phrase, 1, true)
-  if start then
-    table.insert(highlights, {
-      line = line_number,
-      group = group,
-      start = start - 1,
-      finish = start - 1 + #phrase,
-    })
-  end
-end
-
 local function text_lines(value)
   value = tostring(value ~= vim.NIL and value or ""):gsub("%z", "�"):gsub("\r", "")
   return vim.split(value, "\n", { plain = true })
@@ -75,17 +63,17 @@ local function broker_session_is_active(session)
     and session.state ~= "failed"
 end
 
-local function session_badge(session)
+local function session_text_group(session)
   if session_is_active(session) then
-    return "●", "AgentManagerStatusSuccess"
+    return "AgentManagerStatusSuccess"
   end
   if not broker_session_is_active(session) and session.activity_known == false then
-    return "?", "AgentManagerStatusWaiting"
+    return "AgentManagerStatusWaiting"
   end
   if type(session.provider_session_id) == "string" and session.provider_session_id ~= "" then
-    return "○", "AgentManagerInput"
+    return nil
   end
-  return "×", "AgentManagerMuted"
+  return "AgentManagerSessionEnded"
 end
 
 local function usage_lines(value, prefix, lines, depth)
@@ -1408,27 +1396,15 @@ end
 
 function View:_render_agents()
   local sessions = self.model:session_list()
-  local provider_legend = " key · ● Codex · ◆ Claude"
-  local primary_state_legend = "       ● active · ○ resume"
-  local secondary_state_legend = "       ? check · × ended"
   local lines = {
     "## 1 AGENTS · BY DIRECTORY  ·  2 WORKFLOWS",
     string.format(" broker: %s · sessions: %d", inline(self.model.client_state), #sessions),
-    provider_legend,
-    primary_state_legend,
-    secondary_state_legend,
     "",
   }
   local highlights = {
     { line = 1, group = "AgentManagerTitle" },
     { line = 2, group = "AgentManagerMuted" },
   }
-  add_phrase_highlight(highlights, 3, provider_legend, "● Codex", "AgentManagerProviderCodex")
-  add_phrase_highlight(highlights, 3, provider_legend, "◆ Claude", "AgentManagerProviderClaude")
-  add_phrase_highlight(highlights, 4, primary_state_legend, "● active", "AgentManagerStatusSuccess")
-  add_phrase_highlight(highlights, 4, primary_state_legend, "○ resume", "AgentManagerInput")
-  add_phrase_highlight(highlights, 5, secondary_state_legend, "? check", "AgentManagerStatusWaiting")
-  add_phrase_highlight(highlights, 5, secondary_state_legend, "× ended", "AgentManagerMuted")
   self.agent_rows = {}
   self.session_rows = {}
   self.session_group_rows = {}
@@ -1462,33 +1438,28 @@ function View:_render_agents()
     session = vim.deepcopy(session)
     session.cwd = session_path(session.cwd, self.home)
     local selected = session.managed and session.id == self.model.selected_agent_id and ">" or " "
-    local provider = session.provider == "claude" and "◆" or "●"
-    local badge, badge_group = session_badge(session)
     local pending = session.managed and #self.model:pending(session.id) or 0
     local marker = pending > 0 and (" !" .. tostring(pending)) or ""
     local lead = selected == ">" and "> " or ""
-    table.insert(lines, string.format(
-      "%s%s %s · %s%s",
-      lead,
-      provider,
-      badge,
-      inline(session.title),
-      marker
-    ))
+    local title = inline(session.title)
+    table.insert(lines, lead .. "· " .. title .. marker)
     self.session_rows[#lines] = session
     table.insert(highlights, {
       line = #lines,
       group = session.provider == "claude" and "AgentManagerProviderClaude"
         or "AgentManagerProviderCodex",
       start = #lead,
-      finish = #lead + #provider,
+      finish = #lead + #"·",
     })
-    table.insert(highlights, {
-      line = #lines,
-      group = badge_group,
-      start = #lead + #provider + 1,
-      finish = #lead + #provider + 1 + #badge,
-    })
+    local text_group = session_text_group(session)
+    if text_group then
+      table.insert(highlights, {
+        line = #lines,
+        group = text_group,
+        start = #lead + #"· ",
+        finish = #lead + #"· " + #title,
+      })
+    end
     if session.managed then
       self.agent_rows[#lines] = session.id
     end

@@ -70,6 +70,8 @@ local palette = {
   yellow = token("ux.foundation.palette.yellow", "#EED49F"),
   red = token("ux.foundation.palette.red", "#ED8796"),
   peach = token("ux.foundation.palette.peach", "#F5A97F"),
+  black = { declared = { source = "literal", value = { kind = "rgb", value = "#000000" } },
+    fallback = { kind = "rgb", value = "#000000" } },
 }
 
 local function role(id, label, group, native_link, foreground, opts)
@@ -196,6 +198,7 @@ local COMPONENTS = {
       role("waiting", "Waiting", "AgentManagerStatusWaiting", "DiagnosticWarn", palette.yellow),
       role("success", "Success", "AgentManagerStatusSuccess", "DiagnosticOk", palette.green),
       role("failure", "Failure", "AgentManagerStatusFailure", "DiagnosticError", palette.red),
+      role("session_ended", "Ended Session", "AgentManagerSessionEnded", "Comment", palette.black),
       role("interrupted", "Interrupted", "AgentManagerStatusInterrupted", "DiagnosticWarn", palette.peach),
     },
   },

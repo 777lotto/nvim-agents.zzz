@@ -365,20 +365,22 @@ function Workflows:render()
                   state = active[task.status] and index == #task.attempts and "active" or "recorded"
                 end
                 local identity = inline(attempt.session_id)
-                local lead = ""
-                local provider = attempt.provider == "claude" and "◆" or "●"
-                local badge = state == "active" and "●" or state == "failed" and "×" or "○"
-                add(string.format("%s%s %s · %s · %s", lead, provider, badge,
-                  inline(attempt.id), identity ~= "" and identity or "transcript identity unavailable"),
+                local session_text = inline(attempt.id) .. " · "
+                  .. (identity ~= "" and identity or "transcript identity unavailable")
+                add("· " .. session_text,
                   { key = key .. "/session/" .. attempt.id, task_key = key, parent = key, kind = "session",
-                    task = task, program = program, attempt = attempt },
-                  active[task.status] and index == #task.attempts and "AgentManagerStatusWaiting" or nil)
-                span_highlights[#span_highlights + 1] = { #lines - 1, #lead,
-                  #lead + #provider, attempt.provider == "claude" and "AgentManagerProviderClaude"
+                    task = task, program = program, attempt = attempt })
+                span_highlights[#span_highlights + 1] = { #lines - 1, 0,
+                  #"·", attempt.provider == "claude" and "AgentManagerProviderClaude"
                     or "AgentManagerProviderCodex" }
-                span_highlights[#span_highlights + 1] = { #lines - 1,
-                  #lead + #provider + 1, #lead + #provider + 1 + #badge,
-                  state == "active" and "AgentManagerStatusSuccess" or "AgentManagerMuted" }
+                local text_group = (state == "blocked" or task.status == "blocked" and index == #task.attempts)
+                    and "AgentManagerStatusFailure"
+                  or state == "active" and "AgentManagerStatusSuccess"
+                  or (state == "failed" or completed[task.status]) and "AgentManagerSessionEnded" or nil
+                if text_group then
+                  span_highlights[#span_highlights + 1] = { #lines - 1,
+                    #"· ", #"· " + #session_text, text_group }
+                end
               end
               if #task.attempts == 0 then table.insert(lines, "No sessions yet") end
             end

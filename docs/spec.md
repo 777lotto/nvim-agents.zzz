@@ -635,10 +635,10 @@ maintaining a competing set.
   refresh does not wait on or initiate the lifecycle authority's full cleanup
   audit. The opening project and a focused directory supply repository context
   to the start flow through the required canonical/worktree layout, with the
-  lifecycle claim validating the candidate before launch. A key at the top maps
-  distinct provider and session-state symbols to semantic colors. Rows retain
-  only the provider symbol, state symbol, and title so repeated labels do not
-  crowd the directory tree. Records are de-duplicated by provider session ID.
+  lifecycle claim validating the candidate before launch. A colored `·` marks
+  the provider on each session row, and title color shows session status. Rows
+  retain only the provider mark and title. Records are de-duplicated by provider
+  session ID.
 - **Conversation:** user and assistant messages with incremental updates,
   compaction boundaries, provider notices, and a persistent bottom prompt box.
   The prompt wraps at word boundaries, expands between configured minimum and

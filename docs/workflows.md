@@ -77,14 +77,16 @@ are collapsed. Expanding one reveals collapsed phases with completion counts:
 **R1** · 7/9 complete
 [x] *Inventory callers* · merged · 3 sessions
 [>] *Replace shared primitives* · running · 2 sessions
-◆ ○ · session-001-implement · <session identity>
-● ● · session-002-review · <session identity>
+· session-001-implement · <session identity>
+· session-002-review · <session identity>
 
 ---
 ```
 
 Counts in this illustration are examples. `merged`, `satisfied`, and `completed`
-all count as complete. Milestones appear in first-occurrence manifest order;
+all count as complete. The session `·` is blue for Codex or orange for Claude,
+and session text is green when active, regular when resumable, black when ended,
+or red when blocked. Milestones appear in first-occurrence manifest order;
 tasks preserve their order within each milestone. Missing milestones appear
 under Other tasks. Polling preserves expansion choices and cursor identity;
 running tasks do not force their parents open.
