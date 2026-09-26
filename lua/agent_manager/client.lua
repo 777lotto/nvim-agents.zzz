@@ -42,6 +42,7 @@ function Client.new(opts)
     socket = opts.socket,
     codex_executable = opts.codex_executable,
     claude_python = opts.claude_python,
+    claude_setting_sources = opts.claude_setting_sources,
     workspace_lifecycle = opts.workspace_lifecycle,
     allow_shared_workspaces = opts.allow_shared_workspaces == true,
     reconnect = {
@@ -85,6 +86,14 @@ function Client:_argv()
   if self.mode == "embedded" and type(self.claude_python) == "string" and self.claude_python ~= "" then
     table.insert(command, "--claude-python")
     table.insert(command, self.claude_python)
+  end
+  if
+    self.mode == "embedded"
+    and type(self.claude_setting_sources) == "table"
+    and #self.claude_setting_sources > 0
+  then
+    table.insert(command, "--claude-setting-sources")
+    table.insert(command, table.concat(self.claude_setting_sources, ","))
   end
   if self.mode == "embedded" then
     if type(self.workspace_lifecycle) == "string" and self.workspace_lifecycle ~= "" then

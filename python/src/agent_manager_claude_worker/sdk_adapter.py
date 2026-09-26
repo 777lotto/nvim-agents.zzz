@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import platform
+from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -165,6 +166,7 @@ class ClaudeSdkAdapter:
         fork: bool,
         model: str | None,
         effort: str | None,
+        setting_sources: Sequence[str],
         callback: HumanCallback,
     ) -> ClaudeSession:
         try:
@@ -223,11 +225,14 @@ class ClaudeSdkAdapter:
             can_use_tool=can_use_tool,
             model=model,
             effort=cast(Any, effort),
-            # M0 intentionally avoids loading executable behavior from the
-            # target repository. Later provider configuration may expose a
-            # reviewed setting-source policy explicitly.
-            setting_sources=[],
-            strict_mcp_config=True,
+            # M0 loads no setting source and keeps strict MCP configuration so
+            # a target repository cannot inject executable Claude behavior.
+            # M7 exposes the reviewed policy explicitly: the broker forwards
+            # the operator's `setting_sources`, and strict MCP configuration is
+            # released only when a source is loaded, because with strict mode
+            # on a loaded plugin's MCP servers would still be dropped.
+            setting_sources=cast(Any, list(setting_sources)),
+            strict_mcp_config=not setting_sources,
         )
         client = ClaudeSDKClient(options=options)
         try:

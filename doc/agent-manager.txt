@@ -40,6 +40,8 @@ configuration pins.
           python = "/path/to/worker-runtime/bin/python",
           model = "sonnet", -- optional initial default
           effort = "high",  -- optional initial default
+          -- optional; nil loads no settings, plugins, or MCP servers
+          setting_sources = { "user" },
         },
       },
       worktrees = {

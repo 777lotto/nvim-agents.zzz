@@ -18,6 +18,32 @@ pub const TESTED_CLAUDE_SDK_VERSION: &str = "0.2.158";
 pub const TESTED_CLAUDE_CODE_VERSION: &str = "2.1.280";
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
 
+/// Claude setting sources the broker may forward on session open.
+pub const CLAUDE_SETTING_SOURCES: [&str; 3] = ["user", "project", "local"];
+
+/// Parses the `--claude-setting-sources` option: a comma-separated,
+/// duplicate-free subset of [`CLAUDE_SETTING_SOURCES`].
+pub fn parse_setting_sources(raw: &str) -> Result<Vec<String>, String> {
+    let mut sources = Vec::new();
+    for token in raw.split(',') {
+        let token = token.trim();
+        if token.is_empty() {
+            return Err(
+                "Claude setting sources must be a comma-separated list of user, project, local"
+                    .to_owned(),
+            );
+        }
+        if !CLAUDE_SETTING_SOURCES.contains(&token) {
+            return Err(format!("unknown Claude setting source: {token}"));
+        }
+        if sources.iter().any(|existing| existing == token) {
+            return Err(format!("duplicate Claude setting source: {token}"));
+        }
+        sources.push(token.to_owned());
+    }
+    Ok(sources)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkerCommandSpec {
     pub program: String,
@@ -327,6 +353,24 @@ fn response_error(error: &Value) -> WorkerError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn setting_sources_accept_known_unique_tokens_only() {
+        assert_eq!(
+            super::parse_setting_sources("user, project"),
+            Ok(vec!["user".to_owned(), "project".to_owned()])
+        );
+        assert_eq!(
+            super::parse_setting_sources("local"),
+            Ok(vec!["local".to_owned()])
+        );
+        for invalid in ["", "user,", "managed", "user,user", " , "] {
+            assert!(
+                super::parse_setting_sources(invalid).is_err(),
+                "{invalid:?}"
+            );
+        }
+    }
+
     use serde_json::json;
 
     use super::{CLAUDE_COMPATIBILITY_PROFILE, WorkerError, runtime_identity};

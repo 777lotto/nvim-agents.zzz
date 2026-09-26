@@ -79,7 +79,16 @@
         "agent_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "cwd": { "type": "string", "minLength": 1, "maxLength": 8192 },
         "model": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
-        "effort": { "type": ["string", "null"], "enum": ["low", "medium", "high", "xhigh", "max", null] }
+        "effort": { "type": ["string", "null"], "enum": ["low", "medium", "high", "xhigh", "max", null] },
+        "setting_sources": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 3,
+            "items": {
+                "type": "string",
+                "enum": ["user", "project", "local"]
+            }
+        }
       }
     },
     "resumeParams": {
@@ -91,7 +100,16 @@
         "cwd": { "type": "string", "minLength": 1, "maxLength": 8192 },
         "session_id": { "type": "string", "minLength": 1, "maxLength": 1024 },
         "model": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
-        "effort": { "type": ["string", "null"], "enum": ["low", "medium", "high", "xhigh", "max", null] }
+        "effort": { "type": ["string", "null"], "enum": ["low", "medium", "high", "xhigh", "max", null] },
+        "setting_sources": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 3,
+            "items": {
+                "type": "string",
+                "enum": ["user", "project", "local"]
+            }
+        }
       }
     },
     "turnParams": {

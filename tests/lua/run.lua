@@ -970,6 +970,22 @@ local function public_input_validation_test()
   assert_equal(config_err.kind, "configuration", "invalid prompt minimum error")
   _, config_err = Config.resolve({ ui = { prompt_min_height = 5, prompt_max_height = 4 } })
   assert_equal(config_err.kind, "configuration", "invalid prompt height range error")
+  for _, invalid in ipairs({ { "managed" }, { "user", "user" }, {}, "user" }) do
+    _, config_err = Config.resolve({ providers = { claude = { setting_sources = invalid } } })
+    assert_equal(config_err.kind, "configuration", "invalid claude setting sources error")
+  end
+  local sourced = assert(Config.resolve({ providers = { claude = { setting_sources = { "user" } } } }))
+  assert_equal(sourced.providers.claude.setting_sources, { "user" }, "claude setting sources kept")
+  local Client = require("agent_manager.client")
+  local argv = Client.new({
+    command = { "/broker", "serve" },
+    claude_python = false,
+    claude_setting_sources = { "user", "project" },
+  }):_argv()
+  assert(vim.tbl_contains(argv, "--claude-setting-sources"), "setting sources flag in argv")
+  assert(vim.tbl_contains(argv, "user,project"), "setting sources joined in argv")
+  argv = Client.new({ command = { "/broker", "serve" }, claude_python = false }):_argv()
+  assert(not vim.tbl_contains(argv, "--claude-setting-sources"), "no flag without sources")
 
   local result, err = manager.prompt(nil, "")
   assert_equal(result, nil, "empty string prompt result")

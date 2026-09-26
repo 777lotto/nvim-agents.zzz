@@ -580,6 +580,14 @@ The broker must retain a specific Claude session ID instead of relying on
 working directory. Session persistence does not imply filesystem rollback; the
 workspace treats those as separate concerns.
 
+Setting sources are a reviewed, explicit policy. The worker starts the SDK
+with no setting sources and strict MCP configuration unless
+`providers.claude.setting_sources` names `user`, `project`, or `local`; the
+broker forwards the list unchanged on every session open, and strict MCP
+configuration is released only when at least one source is loaded. The
+recommended operator value is `user`, which loads the installed plugin and its
+MCP servers to match what Codex reads from its own user configuration.
+
 The worker negotiates behavior against the exact pinned Python SDK. If an SDK
 release removes or changes a relied-upon type, hook, callback, or message, the
 adapter fails compatibility checks rather than parsing the interactive Claude
@@ -1270,6 +1278,25 @@ Design status: accepted on 2026-09-26; see
 [M6 operator decisions](architecture/m6-operator-decisions.md). The workflow
 contract in `protocol/workflow/v1/decision.schema.json` is validated by
 `mise run verify`; runtime slices are not yet implemented.
+
+### M7: ACP provider seam
+
+- Make the Agent Client Protocol the vocabulary of an internal provider seam;
+  never a third-party adapter process in the hot path (both official ACP
+  adapters are npm packages, and neither CLI ships ACP natively).
+- Expose the Claude setting-source policy that M0 deferred as
+  `providers.claude.setting_sources`, off by default, forwarded to the worker
+  as an additive `setting_sources` parameter on session open.
+- Share one Codex App Server connection per broker instead of one process per
+  agent; the daemon's Unix listener is WebSocket over a Unix stream.
+- Replace the Python worker on the editor path with a Rust stream-json adapter,
+  host editor state as broker-owned MCP tools (in-process for Claude, a stdio
+  shim over the durable socket for Codex), and add `PreToolUse`/`PostToolUse`
+  callbacks for writer isolation and diff capture.
+
+Design status: accepted on 2026-09-26; see
+[M7 ACP provider seam](architecture/m7-acp-provider-seam.md). The
+setting-source policy is implemented; the remaining steps are not.
 
 ## Acceptance criteria
 

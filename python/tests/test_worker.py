@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -79,6 +79,7 @@ class FakeAdapter:
         self.callback: HumanCallback | None = None
         self.session: FakeSession | None = None
         self.opens: list[tuple[str, Path, str | None, bool, str | None, str | None]] = []
+        self.setting_sources: list[list[str]] = []
         self.deleted: list[tuple[str, str]] = []
         self.activity_available = True
 
@@ -125,10 +126,12 @@ class FakeAdapter:
         fork: bool,
         model: str | None,
         effort: str | None,
+        setting_sources: Sequence[str],
         callback: HumanCallback,
     ) -> Session:
         self.callback = callback
         self.opens.append((agent_id, cwd, resume, fork, model, effort))
+        self.setting_sources.append(list(setting_sources))
         self.session = FakeSession(agent_id, cwd, "fork-session" if fork else resume)
         return self.session
 
@@ -284,6 +287,56 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
                 adapter.opens[-1],
                 ("agent-1", canonical_directory, "new-session", False, "opus", "high"),
             )
+            await worker.close()
+
+    async def test_setting_sources_are_validated_and_forwarded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = FakeAdapter()
+            writer = RecordingWriter()
+            worker = Worker(adapter, writer)
+            await initialize(worker, writer)
+            invalid_sources: list[JsonValue] = [["managed"], ["user", "user"], "user"]
+            for request_id, invalid in enumerate(invalid_sources, start=2):
+                rejected = await send_and_wait(
+                    worker,
+                    writer,
+                    request(
+                        request_id,
+                        "session/start",
+                        {"agent_id": "agent-1", "cwd": directory, "setting_sources": invalid},
+                    ),
+                )
+                error = rejected["error"]
+                assert isinstance(error, dict)
+                self.assertEqual(error["code"], -32602, repr(invalid))
+            self.assertEqual(adapter.setting_sources, [])
+
+            opened = await send_and_wait(
+                worker,
+                writer,
+                request(
+                    5,
+                    "session/start",
+                    {
+                        "agent_id": "agent-1",
+                        "cwd": directory,
+                        "setting_sources": ["user", "project"],
+                    },
+                ),
+            )
+            self.assertIn("result", opened)
+            self.assertEqual(adapter.setting_sources, [["user", "project"]])
+
+            await send_and_wait(
+                worker, writer, request(6, "session/close", {"agent_id": "agent-1"})
+            )
+            reopened = await send_and_wait(
+                worker,
+                writer,
+                request(7, "session/start", {"agent_id": "agent-1", "cwd": directory}),
+            )
+            self.assertIn("result", reopened)
+            self.assertEqual(adapter.setting_sources[-1], [])
             await worker.close()
 
     async def test_discovery_history_specific_resume_and_fork(self) -> None:

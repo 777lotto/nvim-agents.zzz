@@ -1,0 +1,14 @@
+{
+  "jsonrpc": "2.0",
+  "id": 15,
+  "method": "session/start",
+  "params": {
+    "agent_id": "agent-1",
+    "cwd": "/workspace/agent-manager",
+    "model": "sonnet",
+    "effort": "high",
+    "setting_sources": [
+      "user"
+    ]
+  }
+}

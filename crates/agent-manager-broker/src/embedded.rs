@@ -87,6 +87,12 @@ impl EmbeddedConfig {
     }
 
     #[must_use]
+    pub fn with_claude_setting_sources(mut self, sources: Vec<String>) -> Self {
+        self.runtime.claude_setting_sources = sources;
+        self
+    }
+
+    #[must_use]
     pub fn with_workspace_lifecycle(mut self, program: impl Into<String>) -> Self {
         self.workspace = Some(WorkspaceCommandSpec {
             program: program.into(),

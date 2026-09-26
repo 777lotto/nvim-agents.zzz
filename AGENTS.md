@@ -19,6 +19,10 @@
   presentation catalog, pure Styling discovery adapter, native Panels fallback,
   Chrome coexistence, and cached status integration. Keep durable sockets and
   multiple live agents within M4 unless the specification is explicitly revised.
+- M7 owns the ACP-shaped provider seam. ACP is an internal vocabulary, never a
+  third-party adapter process; the Claude setting-source policy is explicit and
+  off by default; see `docs/architecture/m7-acp-provider-seam.md` before
+  touching provider transports.
 
 ## Safety boundaries
 

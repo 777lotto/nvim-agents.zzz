@@ -83,6 +83,11 @@ function M.check()
       "Install the packaged runtime, run mise run setup in a development checkout, or configure providers.claude.python.",
     })
   end
+  if type(health.claude_setting_sources) == "table" and #health.claude_setting_sources > 0 then
+    vim.health.ok("Claude setting sources: " .. table.concat(health.claude_setting_sources, ", "))
+  else
+    vim.health.info("Claude setting sources: none (plugins and MCP servers stay unloaded)")
+  end
   local worktrees = health.worktrees or {}
   if worktrees.lifecycle and vim.fn.executable(worktrees.lifecycle) == 1 then
     vim.health.ok("managed worktree lifecycle: " .. worktrees.lifecycle)

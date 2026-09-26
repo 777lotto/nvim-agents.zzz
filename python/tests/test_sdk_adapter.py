@@ -253,6 +253,29 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_adapter_forwards_setting_sources_and_releases_strict_mcp(self) -> None:
+        async def callback(method: str, payload: JsonObject) -> JsonObject:
+            del method, payload
+            return {"decision": "deny"}
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(sdk_adapter, "ClaudeSDKClient", RecordingSdkClient):
+                await ClaudeSdkAdapter().open_session(
+                    agent_id="agent-1",
+                    cwd=Path(directory),
+                    resume=None,
+                    fork=False,
+                    model=None,
+                    effort=None,
+                    setting_sources=["user"],
+                    callback=callback,
+                )
+            options = RecordingSdkClient.instances[-1].options
+            self.assertIsNotNone(options)
+            assert options is not None
+            self.assertEqual(options.setting_sources, ["user"])
+            self.assertIs(options.strict_mcp_config, False)
+
     async def test_adapter_builds_locked_options_and_maps_structured_question(self) -> None:
         callback_records: list[tuple[str, JsonObject]] = []
 
@@ -269,6 +292,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                     fork=False,
                     model="sonnet",
                     effort="high",
+                    setting_sources=[],
                     callback=callback,
                 )
 
@@ -333,6 +357,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                     fork=False,
                     model=None,
                     effort=None,
+                    setting_sources=[],
                     callback=callback,
                 )
                 resumed_options = RecordingSdkClient.instances[-1].options
@@ -349,6 +374,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                     fork=True,
                     model=None,
                     effort=None,
+                    setting_sources=[],
                     callback=callback,
                 )
                 forked_options = RecordingSdkClient.instances[-1].options

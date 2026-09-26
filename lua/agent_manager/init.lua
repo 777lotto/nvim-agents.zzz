@@ -243,6 +243,7 @@ function M.setup(opts)
     reconnect = config.broker.reconnect,
     codex_executable = config.providers.codex.executable,
     claude_python = config.providers.claude.python,
+    claude_setting_sources = config.providers.claude.setting_sources,
     workspace_lifecycle = config.worktrees.lifecycle,
     allow_shared_workspaces = config.worktrees.allow_shared,
     on_notification = function(method, params)
@@ -2627,6 +2628,7 @@ function M.health()
     mode = config and config.broker.mode or nil,
     codex_executable = config and config.providers.codex.executable or nil,
     claude_python = config and config.providers.claude.python or nil,
+    claude_setting_sources = config and config.providers.claude.setting_sources or nil,
     worktrees = config and vim.deepcopy(config.worktrees) or nil,
     agents = status.model and status.model.agents or {},
     ux = runtime and runtime.ux:status() or UX.detect(),
