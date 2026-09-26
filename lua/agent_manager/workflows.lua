@@ -309,9 +309,13 @@ function Workflows:render()
     self.rows[#lines] = row
     if highlight then table.insert(highlights, { #lines - 1, highlight }) end
   end
-  local function marker(key) return self.expanded[key] and "▾" or "▸" end
   if self.error then table.insert(lines, " " .. self.error) end
-  for _, program in ipairs(self.snapshot.programs or {}) do
+  for index, program in ipairs(self.snapshot.programs or {}) do
+    if index > 1 then
+      table.insert(lines, "")
+      table.insert(lines, "---")
+      table.insert(lines, "")
+    end
     local program_key = program.repository .. "/" .. program.program
     local count, phases, by_phase = 0, {}, {}
     for _, task in ipairs(program.tasks) do
@@ -336,26 +340,21 @@ function Workflows:render()
         provider_status = provider_status .. " · switch canceled: session limit"
       end
     end
-    add(string.format(" %s **%s / %s** · %d/%d complete%s", marker(program_key), inline(program.repository),
+    add(string.format("**%s / %s** · %d/%d complete%s", inline(program.repository),
       inline(program.program), count, #program.tasks, (program.control.paused == true and " · paused" or "") .. provider_status),
       { key = program_key, kind = "program", program = program })
     if self.expanded[program_key] then
-      for phase_index, phase in ipairs(phases) do
-        local phase_last = phase_index == #phases
-        local phase_prefix = phase_last and "   " or " │ "
-        add(string.format(" %s %s **%s** · %d/%d complete", phase_last and "└─" or "├─",
-          marker(phase.key), phase.name, phase.count, #phase.tasks),
+      for _, phase in ipairs(phases) do
+        add(string.format("**%s** · %d/%d complete", phase.name, phase.count, #phase.tasks),
           { key = phase.key, parent = program_key, kind = "phase", program = program })
         if self.expanded[phase.key] then
-          for task_index, task in ipairs(phase.tasks) do
-            local task_last = task_index == #phase.tasks
+          for _, task in ipairs(phase.tasks) do
             local key = program_key .. "/task/" .. task.id
             local mark = completed[task.status] and "x" or (active[task.status] and ">"
               or (task.status == "pending" or task.status == "ready") and " " or "!")
             local highlight = completed[task.status] and "AgentManagerStatusSuccess"
               or active[task.status] and "AgentManagerStatusWaiting" or nil
-            add(string.format(" %s%s %s [%s] *%s* · %s · %d sessions", phase_prefix,
-              task_last and "└─" or "├─", marker(key), mark,
+            add(string.format("[%s] *%s* · %s · %d sessions", mark,
               inline(type(task.goal) == "string" and task.goal:match("[^\n]*") or ""),
               inline(task.status), #task.attempts),
               { key = key, task_key = key, parent = phase.key, kind = "task", task = task, program = program }, highlight)
@@ -366,8 +365,7 @@ function Workflows:render()
                   state = active[task.status] and index == #task.attempts and "active" or "recorded"
                 end
                 local identity = inline(attempt.session_id)
-                local lead = string.format(" %s%s%s ", phase_prefix,
-                  task_last and "   " or "│  ", index == #task.attempts and "└─" or "├─")
+                local lead = ""
                 local provider = attempt.provider == "claude" and "◆" or "●"
                 local badge = state == "active" and "●" or state == "failed" and "×" or "○"
                 add(string.format("%s%s %s · %s · %s", lead, provider, badge,
@@ -382,14 +380,13 @@ function Workflows:render()
                   #lead + #provider + 1, #lead + #provider + 1 + #badge,
                   state == "active" and "AgentManagerStatusSuccess" or "AgentManagerMuted" }
               end
-              if #task.attempts == 0 then table.insert(lines, "       No sessions yet") end
+              if #task.attempts == 0 then table.insert(lines, "No sessions yet") end
             end
           end
         end
       end
-      if #program.tasks == 0 then table.insert(lines, "   No tasks yet") end
+      if #program.tasks == 0 then table.insert(lines, "No tasks yet") end
     end
-    table.insert(lines, "")
   end
   if #(self.snapshot.programs or {}) == 0 then table.insert(lines, " No workflow programs found") end
   for _, err in ipairs(self.snapshot.errors or {}) do table.insert(lines, " " .. inline(err)) end

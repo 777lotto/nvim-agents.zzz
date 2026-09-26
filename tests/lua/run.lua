@@ -262,13 +262,16 @@ local function directory_markdown_and_bottom_test()
   local buffer = view.buffers.agents
   assert_equal(vim.treesitter.language.get_lang("agent-manager-agents"), "markdown")
   assert(vim.treesitter.highlighter.active[buffer], "directory Markdown parser")
-  assert(buffer_contains(buffer, "**Sessions** (7 · first 5)"), "initial session limit")
+  assert(buffer_contains(buffer, "*Sessions* (7 · first 5)"), "initial session limit")
+  assert(buffer_has_line(buffer, "*Sessions* (7 · first 5)"), "flat session group")
+  assert(buffer_has_line(buffer, "● ○ · session 7"), "flat session row")
+  assert(buffer_has_line(buffer, "---"), "Markdown directory separator")
   assert(buffer_contains(buffer, "session 3") and not buffer_contains(buffer, "session 2"), "only newest five")
   assert(not buffer_contains(buffer, "note.txt"), "files stay hidden")
   local past_row = assert(buffer_line_number(buffer, "renamed/**  [past cwd]"))
   vim.api.nvim_win_set_cursor(view.windows.agents, { past_row, 0 })
   assert_equal(view:_start_context(), false, "historical path cannot start a new session")
-  local group = assert(buffer_line_number(buffer, "**Sessions**"))
+  local group = assert(buffer_line_number(buffer, "*Sessions*"))
   vim.api.nvim_win_set_cursor(view.windows.agents, { group, 0 })
   vim.api.nvim_feedkeys(vim.keycode("<CR>"), "x", false)
   assert(vim.wait(1000, function() return buffer_contains(buffer, "session 1") end), "expand all sessions")
@@ -419,6 +422,15 @@ local function workspace_view_navigation_test()
   local projects_row = assert(buffer_line_number(status.buffers.agents, "projects/"))
   local notes_row = assert(buffer_line_number(status.buffers.agents, "notes/"))
   assert(projects_row < notes_row, "directories containing sessions sort first")
+  local separator_row
+  for row = projects_row + 1, notes_row - 1 do
+    if vim.api.nvim_buf_get_lines(status.buffers.agents, row - 1, row, false)[1] == "---" then
+      separator_row = row
+      break
+    end
+  end
+  assert(projects_row < separator_row and separator_row < notes_row,
+    "separator divides top-level directory blocks")
   for _, pane in ipairs({ "agents", "conversation" }) do
     assert(view:focus(pane))
     assert_equal(view:status().active_pane, pane, "numbered pane navigation")
@@ -434,7 +446,7 @@ local function workspace_view_navigation_test()
     buffer_contains(status.buffers.agents, "◆ ● · claude fixture"),
     "directory sessions ignore file collapse"
   )
-  assert(buffer_contains(status.buffers.agents, "**Sessions** (3)"), "dedicated session group")
+  assert(buffer_contains(status.buffers.agents, "*Sessions* (3)"), "dedicated session group")
   assert(not buffer_contains(status.buffers.agents, "project.txt"), "collapsed directory hides files only")
   local repository_row = assert(
     buffer_line_number(status.buffers.agents, "agent-manager/**  [repo]"),
@@ -448,9 +460,9 @@ local function workspace_view_navigation_test()
   assert(vim.wait(1000, function()
     return not buffer_contains(status.buffers.agents, "project.txt")
   end), "directory file collapse")
-  assert(buffer_contains(status.buffers.agents, "**Sessions** (3)"), "session group survives file collapse")
+  assert(buffer_contains(status.buffers.agents, "*Sessions* (3)"), "session group survives file collapse")
   assert(buffer_contains(status.buffers.agents, "◆ ● · claude fixture"), "session rows survive file collapse")
-  local session_group_row = assert(buffer_line_number(status.buffers.agents, "**Sessions** (3)"))
+  local session_group_row = assert(buffer_line_number(status.buffers.agents, "*Sessions* (3)"))
   vim.api.nvim_win_set_cursor(0, { session_group_row, 0 })
   vim.api.nvim_feedkeys(vim.keycode("<CR>"), "x", false)
   assert(vim.wait(1000, function()
@@ -1065,7 +1077,7 @@ local function integration_test()
       )
     end
   end
-  expand_tree("▸ **/**", "workspace/")
+  expand_tree("**/**", "workspace/")
   expand_tree("workspace/", "repos/")
   expand_tree("agent-manager/**", "codex resumable fixture")
   expand_tree("repos/", "alpha/")

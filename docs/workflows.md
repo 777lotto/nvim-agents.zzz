@@ -72,13 +72,15 @@ Markdown alone does not update an already registered checklist.
 are collapsed. Expanding one reveals collapsed phases with completion counts:
 
 ```text
-▾ zemrip / rust-program · 12/180 complete
-  ▸ R0 · 5/5 complete
-  ▾ R1 · 7/9 complete
-    ▸ [x] Inventory callers · merged · 3 sessions
-    ▾ [>] Replace shared primitives · running · 2 sessions
-      session-001-implement · claude · ready · <session identity>
-      session-002-review · codex · active · <session identity>
+**zemrip / rust-program** · 12/180 complete
+**R0** · 5/5 complete
+**R1** · 7/9 complete
+[x] *Inventory callers* · merged · 3 sessions
+[>] *Replace shared primitives* · running · 2 sessions
+◆ ○ · session-001-implement · <session identity>
+● ● · session-002-review · <session identity>
+
+---
 ```
 
 Counts in this illustration are examples. `merged`, `satisfied`, and `completed`
